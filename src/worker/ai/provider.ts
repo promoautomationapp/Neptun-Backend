@@ -5,6 +5,7 @@ import {
   textInputSchema,
 } from "../../modules/ai/domain/params";
 import sharp from "sharp";
+import { validateProductCutout } from "./product-cutout";
 import type { Database } from "../../database/database";
 import type { StoragePort } from "../../modules/storage/storage.port";
 import type { AssetRow } from "../../modules/assets/assets.repository";
@@ -407,6 +408,7 @@ export class OpenAiProvider implements AiProvider {
       const base64 = result.data?.[0]?.b64_json;
       if (!base64) throw new ProviderUncertainError();
       let bytes: Buffer = Buffer.from(base64, "base64");
+      if (operation === "cutout") bytes = await validateProductCutout(bytes);
       if (operation === "brand_prep") bytes = await normalizeWhiteLogo(bytes);
       return { bytes, mimeType: "image/png", json: metadata, ...usage };
     }

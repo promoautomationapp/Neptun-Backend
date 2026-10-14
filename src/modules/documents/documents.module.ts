@@ -18,6 +18,7 @@ import { identifier } from "../../shared/json";
 import { reviewInput } from "./domain/review";
 import { DocumentAssets } from "../assets/document-assets";
 import { DocumentsRepository } from "./documents.repository";
+import {CampaignPresenceController, CampaignPresenceRepository, CampaignPresenceCommandHandler, CampaignPresenceQueryHandler} from "./campaign-presence";
 import {
   ListDocumentsQuery,
   GetDocumentQuery,
@@ -141,8 +142,8 @@ export class DocumentsController {
   }
 }
 @Module({
-  controllers: [DocumentsController],
-  providers: [DocumentsRepository, DocumentAssets, ...documentHandlers],
+  controllers: [DocumentsController, CampaignPresenceController],
+  providers: [DocumentsRepository, DocumentAssets, CampaignPresenceRepository, CampaignPresenceCommandHandler, CampaignPresenceQueryHandler, ...documentHandlers],
   exports: [DocumentsRepository],
 })
 export class DocumentsModule {}

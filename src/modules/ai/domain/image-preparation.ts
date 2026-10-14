@@ -86,6 +86,8 @@ export function productCutoutMetadata(
   context: ReturnType<typeof productCutoutContext>,
 ) {
   return {
+    provider: "openai",
+    annotationCleanup: true,
     preparationRevision: context.preparationRevision,
     annotationStyle: context.annotationStyle,
     screenType: context.screenType,
