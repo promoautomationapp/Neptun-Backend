@@ -26,9 +26,9 @@ export class LocalStorage implements StoragePort {
   }
   async put(key: string, bytes: Buffer, _mimeType: string): Promise<void> {
     const path = this.path(key);
-    await mkdir(dirname(path), { recursive: true });
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const temporary = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporary, bytes);
+    await writeFile(temporary, bytes, { mode: 0o600 });
     await rename(temporary, path);
   }
   read(key: string): Promise<Buffer> {

@@ -29,7 +29,9 @@ async function main(): Promise<void> {
   });
   app.useGlobalFilters(new ErrorFilter());
   app.enableShutdownHooks();
-  await app.listen(env.PORT, "0.0.0.0");
+  const host =
+    env.HOST ?? (env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
+  await app.listen(env.PORT, host);
   logger.info({ port: env.PORT }, "Neptun Broshura API ready");
 }
 void main().catch((error) => {

@@ -32,17 +32,24 @@ async function main(): Promise<void> {
         organization_id: string;
         user_id: string;
         email: string;
+        role: Actor["role"];
+        review_role: Actor["reviewRole"];
+        account_role: NonNullable<Actor["accountRole"]>;
       }>(
-        "SELECT m.organization_id,m.user_id,u.email FROM memberships m JOIN users u ON u.id=m.user_id JOIN organizations o ON o.id=m.organization_id WHERE o.slug='neptun' AND m.review_role='staff' LIMIT 1",
+        "SELECT m.organization_id,m.user_id,u.email,m.role,m.review_role,m.account_role FROM memberships m JOIN users u ON u.id=m.user_id JOIN organizations o ON o.id=m.organization_id WHERE o.slug='neptun' AND m.status='active' AND m.role IN ('editor','admin') ORDER BY CASE WHEN m.review_role='staff' THEN 0 WHEN m.account_role='admin' THEN 1 ELSE 2 END,u.email LIMIT 1",
       )
     )[0];
-    if (!member) throw new Error("Run db:seed first.");
+    if (!member)
+      throw new Error(
+        "Create an active Neptun administrator or editor before importing the workspace.",
+      );
     const actor: Actor = {
       organizationId: member.organization_id,
       userId: member.user_id,
       email: member.email,
-      role: "editor",
-      reviewRole: "staff",
+      role: member.role,
+      reviewRole: member.review_role,
+      accountRole: member.account_role,
       mustChangePassword: true,
     };
     const assets = new DocumentAssets(db, storage);

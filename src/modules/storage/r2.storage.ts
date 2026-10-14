@@ -8,6 +8,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { StoragePort } from "./storage.port";
 import { env } from "../../config/environment";
+import { readWithStorageRetry } from "./storage-retry";
 
 export class R2Storage implements StoragePort {
   private readonly client = new S3Client({
@@ -30,11 +31,13 @@ export class R2Storage implements StoragePort {
     );
   }
   async read(key: string): Promise<Buffer> {
-    const result = await this.client.send(
-      new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }),
-    );
-    if (!result.Body) throw new Error("Storage object is empty.");
-    return Buffer.from(await result.Body.transformToByteArray());
+    return readWithStorageRetry(async () => {
+      const result = await this.client.send(
+        new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }),
+      );
+      if (!result.Body) throw new Error("Storage object is empty.");
+      return Buffer.from(await result.Body.transformToByteArray());
+    });
   }
   async exists(key: string): Promise<boolean> {
     try {

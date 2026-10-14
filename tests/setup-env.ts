@@ -9,6 +9,11 @@ process.env.DATABASE_URL = url;
 process.env.DIRECT_DATABASE_URL = url;
 process.env.NODE_ENV = "test";
 process.env.LOCAL_STORAGE_DIR = "./.test-storage";
+process.env.STORAGE_DRIVER = "local";
+process.env.R2_ACCOUNT_ID = "";
+process.env.R2_ACCESS_KEY_ID = "";
+process.env.R2_SECRET_ACCESS_KEY = "";
+process.env.R2_BUCKET = "";
 process.env.OPENAI_API_KEY = "";
 
 process.env.MAIL_DRIVER = "disabled";

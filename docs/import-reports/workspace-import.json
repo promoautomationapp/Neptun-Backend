@@ -1,7 +1,10 @@
 {
   "campaigns": 4,
-  "posts": 5,
-  "embeddedImages": 40,
+  "posts": 6,
+  "embeddedImages": 28,
   "versionsRetained": true,
-  "files": ["team-campaigns.json", "team-posts.json"]
+  "files": [
+    "team-campaigns.json",
+    "team-posts.json"
+  ]
 }

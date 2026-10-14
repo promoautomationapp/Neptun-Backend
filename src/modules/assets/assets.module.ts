@@ -315,11 +315,9 @@ export class AssetsController {
     privateAsset = true,
   ): Promise<void> {
     if (privateAsset) response.vary("Cookie");
-    const signed = await this.storage.signedRead(asset.storage_key);
-    if (signed) {
-      response.set("Cache-Control", "private, no-store").redirect(signed);
-      return;
-    }
+    // Keep authenticated images on the API origin. Browser image inspection
+    // uses credentials, which cannot follow an R2 redirect without credential
+    // CORS support. The storage adapter still reads the unchanged R2 bytes.
     response
       .set("Cache-Control", "private, max-age=31536000, immutable")
       .type(asset.mime_type)

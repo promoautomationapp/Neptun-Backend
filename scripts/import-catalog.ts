@@ -100,6 +100,7 @@ async function main(): Promise<void> {
         declared: string;
         detected: string;
       }[],
+      sanitizedSvgAssets: [] as string[],
     };
     const hashes = new Set<string>();
     const aliases = new Map<string, string>();
@@ -149,8 +150,14 @@ async function main(): Promise<void> {
           },
         );
         const copied = await storage.read(asset.storage_key);
-        if (createHash("sha256").update(copied).digest("hex") !== sha)
+        const copiedHash = createHash("sha256").update(copied).digest("hex");
+        if (
+          copiedHash !== asset.sha256 ||
+          (mime !== "image/svg+xml" && copiedHash !== sha)
+        )
           throw new Error(`Checksum mismatch for ${relative(source, path)}`);
+        if (mime === "image/svg+xml" && copiedHash !== sha)
+          report.sanitizedSvgAssets.push(relative(source, path));
         await db.query(
           "INSERT INTO asset_aliases(organization_id,source_path,asset_id) VALUES($1,$2,$3) ON CONFLICT(organization_id,source_path) DO NOTHING",
           [organization.id, alias, asset.id],
@@ -182,7 +189,7 @@ async function main(): Promise<void> {
         typeof product[key] === "string" ? product[key] : "";
       await db.transaction(async (client) => {
         const result = await client.query<{ id: string }>(
-          "INSERT INTO products(organization_id,code,name,brand,model,category,subcategory,category_path,description,warranty,regular,currency,specs,availability,product_url,source,primary_asset_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(organization_id,code) DO UPDATE SET code=EXCLUDED.code RETURNING id",
+          "INSERT INTO products(organization_id,code,name,brand,model,category,subcategory,category_path,description,warranty,regular,currency,specs,availability,product_url,source,primary_asset_id,source_missing,source_missing_since) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,CASE WHEN $18 THEN now() ELSE NULL END) ON CONFLICT(organization_id,code) DO UPDATE SET code=EXCLUDED.code RETURNING id",
           [
             organization.id,
             code,
@@ -201,6 +208,7 @@ async function main(): Promise<void> {
             text("url"),
             raw,
             primary ?? null,
+            product.sourceMissing === true,
           ],
         );
         const id = result.rows[0]?.id;

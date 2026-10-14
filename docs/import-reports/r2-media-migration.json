@@ -1,0 +1,64 @@
+{
+  "verifiedAt": "2026-10-14T20:46:31.619Z",
+  "bucket": "neptun-studio-assets",
+  "storageDriver": "r2",
+  "migration": {
+    "dryRun": false,
+    "total": 10551,
+    "verified": 10551,
+    "copied": 8972,
+    "reused": 1579,
+    "bytes": 554556697,
+    "retries": 0
+  },
+  "preparedMedia": {
+    "cutouts": 51,
+    "brandLogos": 8,
+    "catalogBrandImages": 101
+  },
+  "browser": {
+    "png": {
+      "width": 1080,
+      "height": 1350,
+      "format": "png"
+    },
+    "browserMedia": {
+      "verifiedR2Assets": 15,
+      "failedRequests": 0,
+      "savedExport": true
+    }
+  },
+  "uploads": {
+    "presignedUpload": true,
+    "confirmationIdempotent": true,
+    "identicalImageReused": true,
+    "originalBytesPreserved": true,
+    "unauthenticatedDenied": true,
+    "otherTenantDenied": true,
+    "brochureReferenceReopened": true,
+    "aiJobs": 0,
+    "isolatedDatabase": true
+  },
+  "sourceLinks": {
+    "assets": "10551",
+    "products": "4564",
+    "campaigns": "4",
+    "posts": "6",
+    "source_brand_images": "101",
+    "prepared_brand_images": "8",
+    "prepared_cutouts": "51",
+    "ai_jobs": "0",
+    "ai_usage": "0",
+    "invalid_product_images": "0",
+    "invalid_prepared_brand_images": "0",
+    "invalid_aliases": "0"
+  },
+  "originalsRetained": true,
+  "aiRequestsDuringMigration": 0,
+  "backendTestsPassed": 165,
+  "dailyCatalog": {
+    "hour": "03:00",
+    "timezone": "Europe/Belgrade",
+    "workerRunningLocally": true
+  }
+}
