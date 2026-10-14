@@ -1,0 +1,74 @@
+{
+  "verifiedAt": "2026-10-06T17:37:18.239Z",
+  "passed": true,
+  "referenceFilesUnchanged": 14289,
+  "importedSourceMedia": 14090,
+  "identicalFonts": 14,
+  "verifiedStorageObjects": 15779,
+  "counts": {
+    "products": "2238",
+    "primary_images": "2224",
+    "campaigns": "4",
+    "posts": "5",
+    "users": "3"
+  },
+  "missingPrimaryImages": [
+    {
+      "code": "84042289",
+      "name": "MELICONI PER PASTRIMIN E SCREENEVE TE TV-S C200 (621001BA)"
+    },
+    {
+      "code": "84059581",
+      "name": "MBAJTESE PER BICIKLETE MELICONI 489001"
+    },
+    {
+      "code": "84062557",
+      "name": "TELEKOMANDE PER KONDICIONER MELICONI AC 200"
+    },
+    {
+      "code": "84063407",
+      "name": "TELEKOMANDE PER TV MELICONI UNIVERSAL SOLAR"
+    },
+    {
+      "code": "KABELL-ANTENE-MELICONI-COAXIAL-90°-PLUG-2M",
+      "name": "Error"
+    },
+    {
+      "code": "MATES-PULSI BEURER-PO30",
+      "name": "Error"
+    },
+    {
+      "code": "MATES-PULSI BEURER-PO45",
+      "name": "Error"
+    },
+    {
+      "code": "MATES-PULSI PER-FEMIJE-BEURER-PO13",
+      "name": "Error"
+    },
+    {
+      "code": "MBROJTES-EKRANI-PURO-PUSDFRAW40BLK-PER-APPLE-WATCH 40MM",
+      "name": "Error"
+    },
+    {
+      "code": "MBROJTES-EKRANI-PURO-PUSDFRAW42BLK-PER-APPLE-WATCH 42MM",
+      "name": "Error"
+    },
+    {
+      "code": "MBROJTES-EKRANI-PURO-PUSDFRAW44BLK-PER-APPLE-WATCH 44MM",
+      "name": "Error"
+    },
+    {
+      "code": "MONITOR PER BEBE PHILIPS AVENT SCD881-26",
+      "name": "Error"
+    },
+    {
+      "code": "XIAOMI-REDMI-NOTE-15-6-128GB PURPLE",
+      "name": "Error"
+    },
+    {
+      "code": "XIAOMI-REDMI-NOTE-15-8-256GB GLACIER-BLUE",
+      "name": "Error"
+    }
+  ],
+  "failures": []
+}

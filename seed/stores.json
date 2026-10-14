@@ -1,0 +1,35 @@
+{
+  "offerStyle": "current",
+  "savingMode": "amount",
+  "stores": [
+    { "city": "PRISHTINË", "name": "Central Park", "address": "Zona Industriale, Prishtinë - Fushë Kosovë", "phone": "046 828 000" },
+    { "city": "PRISHTINË", "name": "Albi Mall", "address": "Zona Industriale Veternik", "phone": "044 193 489" },
+    { "city": "PRISHTINË", "name": "Royal Mall", "address": "Rruga B", "phone": "045 933 626" },
+    { "city": "FUSHË KOSOVË", "name": "Qendra tregtare TED", "address": "Zona Industriale", "phone": "045 434 448" },
+    { "city": "PRIZREN", "name": "Prizren 1", "address": "Rr. Tirana", "phone": "045 322 767" },
+    { "city": "PRIZREN", "name": "Prizren 2 · South Park", "address": "Rr. Brigada 125, Nr. 473", "phone": "046 777 568" },
+    { "city": "PEJË", "name": "American Retail Park", "address": "Rr. Bekim Berisha - Abeja", "phone": "044 193 861" },
+    { "city": "FERIZAJ", "name": "The Village", "address": "Rr. Ahmet Kaçiku", "phone": "045 286 887" },
+    { "city": "GJILAN", "name": "Gjilan 1", "address": "Rr. Lidhja e Prizrenit (afer Viva Fresh Store)", "phone": "045 308 212" },
+    { "city": "GJILAN", "name": "Gjilan 2 · Albi Mall", "address": "Rr. Lufta e Gjilanit 44", "phone": "045 150 028" },
+    { "city": "MITROVICË", "name": "Lux Mall", "address": "Rr. Bislim Bajgora", "phone": "045 990 027" },
+    { "city": "GJAKOVË", "name": "Gjakovë", "address": "Rr. Nëna Terezë", "phone": "046 779 559" },
+    { "city": "VUSHTRRI", "name": "Vushtrri", "address": "Rr. Rrustem Hyseni Historiani (te rrethi)", "phone": "045 970 800" },
+    { "city": "KLINË", "name": "Klinë", "address": "Rr. Abedin Rexha (afër S. Policor)", "phone": "044 137 688" },
+    { "city": "LIPJAN", "name": "Lipjan", "address": "Rr. Avdi Kelmendi", "phone": "045 999 520" },
+    { "city": "PODUJEVË", "name": "Podujevë", "address": "Magjistralja Prishtinë - Podujevë", "phone": "046 600 011" },
+    { "city": "SUHAREKË", "name": "Suharekë", "address": "Rr. Tranziti (Autostrada: Prishtinë - Prizren)", "phone": "045 204 710" }
+  ],
+  "contact": {
+    "email": "info@neptun-ks.com",
+    "website": "www.neptun-ks.com",
+    "facebook": "/NeptunKS",
+    "instagram": "/NeptunKosova",
+    "onlineEmail": "onlineshop@neptun-ks.com",
+    "onlinePhone": "+383 45 790 890",
+    "serviceAddress": "Lagjja Marigona, Preoc",
+    "servicePhones": "+381 38 714 444 · +381 38 715 555",
+    "group": "BALFIN GROUP",
+    "disclaimer": "Dyqanet NEPTUN mbajnë të drejtën për ndryshim të çmimeve. Nuk mbajmë përgjegjësi për gabime eventuale shtypi dhe ju kërkojmë falje për keqkuptimet e mundshme. Fotografitë janë marrë nga prodhuesi dhe mund të ndryshojnë për disa modele. Sasitë e produkteve të broshurës janë të kufizuara dhe si rezultat i kërkesës së lartë mund të mbarojnë."
+  }
+}

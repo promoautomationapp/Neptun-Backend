@@ -1,0 +1,54 @@
+{
+  "products": 10000,
+  "measuredAt": "2026-10-06T10:23:03.482Z",
+  "measurement": "Repository query including count, pagination, sorting and variant joins; local PostgreSQL; 15 measured samples per query after warmup",
+  "targetP95Ms": 100,
+  "passed": true,
+  "queries": {
+    "84064268": {
+      "p50Ms": 56.81,
+      "p95Ms": 59.53,
+      "matches": 5
+    },
+    "Samsung 55": {
+      "p50Ms": 60.08,
+      "p95Ms": 63.48,
+      "matches": 31
+    },
+    "samsung55": {
+      "p50Ms": 59.51,
+      "p95Ms": 63.31,
+      "matches": 31
+    },
+    "QE-55Q7F2A": {
+      "p50Ms": 18.32,
+      "p95Ms": 18.91,
+      "matches": 187
+    },
+    "qe 55 q7f2a": {
+      "p50Ms": 18.02,
+      "p95Ms": 20.64,
+      "matches": 187
+    },
+    "samsng 55": {
+      "p50Ms": 59.61,
+      "p95Ms": 64.42,
+      "matches": 30
+    },
+    "cajnik": {
+      "p50Ms": 56.51,
+      "p95Ms": 64.49,
+      "matches": 4
+    },
+    "telefon": {
+      "p50Ms": 72.13,
+      "p95Ms": 75.72,
+      "matches": 814
+    },
+    "beko": {
+      "p50Ms": 52.92,
+      "p95Ms": 53.84,
+      "matches": 797
+    }
+  }
+}

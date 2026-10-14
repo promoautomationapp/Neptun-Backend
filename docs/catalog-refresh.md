@@ -1,0 +1,19 @@
+# Neptun catalog refresh
+
+The website’s own `data-categorydetails` and `data-productModel` JSON models provide stable `CodeNumber`, manufacturer, retail `RegularPrice`, features, images and `NavigationPath`. The scraper in Downloads was inspected; the HTTP implementation does not require Playwright or a browser runtime. `RatePrice` is never imported as retail price.
+
+Authenticated `POST /api/catalog/refresh` returns 202 immediately with the same status as `GET /api/catalog/refresh`. Runs are durable PostgreSQL records. Concurrent clicks and the daily task reuse one active organization run. The outbox dispatches a `catalog-refresh` job, and the worker reports categories/products progress and a heartbeat. Successful refresh timestamps come from completed runs, with the original catalog import time as the initial fallback.
+
+A PgBoss schedule enqueues the Neptun organization daily at 03:00 Europe/Belgrade. At startup the worker also catches up if the last successful refresh is more than 24 hours old. Run both API and worker; only the worker fetches the website. Requests are limited to four concurrent HTML pages with retries/timeouts and 100 products per listing page. Category navigation is parsed at any depth. Product detail pages are fetched for new/changed listing models and rechecked weekly for unchanged products. Product codes are trimmed consistently before lookup, deduplication and missing-source checks. A detail page that redirects to a different product code is rejected; the correct listing data and any existing details remain available.
+
+Product code upserts update the catalog without changing saved campaign product snapshots. Catalog image jobs use backend object storage (local development storage or R2), skip known URLs, deduplicate by content hash, and create variants. The frontend contains no downloaded product assets. Removed images are retained for old brochures.
+
+Missing products are never deleted. Missing-source flags are applied only after every listing succeeds and the full crawl is not suspiciously smaller than the previous catalog. Partial runs preserve existing missing flags and the last successful timestamp; the UI can retry. Image job failures retain old assets and manual replacement remains available.
+
+The source manufacturer's ID and logo are preserved separately from user-selected brochure logos. `GET /api/catalog/brands` returns the website brand inventory and owned storage URLs. Logo downloads use the same backend object storage and content deduplication as product photos. Refreshing website logos never overwrites a custom brochure logo; the Brands settings tab lets users explicitly select the website image or upload their own.
+
+`npx tsx scripts/repair-catalog-hierarchy.ts` normalizes imported breadcrumb paths without downloading anything. It removes the website’s Home/SHTEPIA navigation root, strips bullet/hyphen markers and keeps every genuine category level. Product category is the first genuine level, subcategory is the leaf, and categoryPath preserves the full branch. `/api/products/facets` includes categoryPath and product search accepts an exact-or-descendant categoryPath filter.
+
+Campaign Studio mirrors the same source parser and manual fetch flow, persists a run status in its configured local workspace storage and updates its local public catalog and media. Daily scheduling and always-visible last-update timestamps belong to the backend product.
+
+The category defaults settings tab uses full paths, so matching names in different branches remain independent. A descendant inherits its closest ancestor's savings mode unless explicitly overridden. The default automatic mode displays a percentage for savings below €50 and an amount for larger savings; the threshold is editable. A product's explicit savings choice takes precedence. Live previews use products from the selected branch.

@@ -1,0 +1,34 @@
+{
+  "products": [
+    {
+      "code": "84050506",
+      "name": "ADAPTER AUDIO 3,5mm2 x 3,5mm M/F",
+      "brand": "S-BOX",
+      "category": "SHTEPIA",
+      "subcategory": "KABLLO TË NDRYSHME",
+      "specs": {}
+    },
+    {
+      "code": "84064268",
+      "name": "TV LED SAMSUNG UE55U7022FKXXH",
+      "brand": "SAMSUNG",
+      "category": "SHTEPIA",
+      "subcategory": "TV",
+      "specs": {
+        "Përmasat": "55\" (140 cm)",
+        "Resolution": "4K Ultra HD (3840 x 2160)"
+      }
+    },
+    {
+      "code": "84064107",
+      "name": "TV QLED SAMSUNG QE55Q7F2AUXXH",
+      "brand": "SAMSUNG",
+      "category": "SHTEPIA",
+      "subcategory": "TV",
+      "specs": {
+        "Përmasat": "55\" (138 cm)",
+        "Rezolucioni": "4K Ultra HD (3840 x 2160)"
+      }
+    }
+  ]
+}

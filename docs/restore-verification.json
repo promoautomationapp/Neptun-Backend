@@ -1,0 +1,26 @@
+{
+  "verifiedAt": "2026-10-06T17:41:40.229Z",
+  "passed": true,
+  "backupCreatedAt": "2026-10-06T17:40:52.672Z",
+  "verifiedObjects": 15779,
+  "counts": {
+    "products": 2238,
+    "product_images": 6966,
+    "campaigns": 4,
+    "campaign_products": 48,
+    "brochures": 4,
+    "brochure_pages": 2,
+    "social_posts": 5,
+    "document_versions": 18,
+    "review_threads": 4,
+    "review_comments": 4,
+    "settings": 1,
+    "users": 3,
+    "memberships": 3,
+    "ai_results": 41,
+    "ai_jobs": 0,
+    "ai_proofread_checks": 0
+  },
+  "temporaryDatabaseRemoved": true,
+  "scope": "Local pg_restore, full schema and immutable object checksums. Frontend/export disaster recovery acceptance remains pending."
+}

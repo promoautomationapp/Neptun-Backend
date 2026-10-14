@@ -1,0 +1,9 @@
+Hello Demo Team Member,
+
+Your invitation to the Neptun workspace
+
+You have been invited to join the workspace as a staff member. Create your password, then verify your email to activate your account. This invitation expires in 48 hours.
+
+Accept invitation: https://workspace.example/account/invitation?token=preview-invitation-token
+
+Neptun Campaign Studio

@@ -1,0 +1,9 @@
+Hello Demo Team Member,
+
+Verify your email address
+
+Enter this verification code in the workspace. It expires in 10 minutes. Keep this code private; our team will never ask you for it.
+
+Verification code: 123456
+
+Neptun Campaign Studio

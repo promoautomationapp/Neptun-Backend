@@ -1,0 +1,46 @@
+import { Router } from "express";
+
+// Keep browser branding independent of uploaded organization assets and storage.
+const faviconSvg =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">\n  <title>Neptun</title>\n  <rect width="64" height="64" rx="11" fill="#fff"/>\n  <path fill="#134684" d="M14 9c-2.2 0-4 1.8-4 4v29c0 2.2 1.8 4 4 4h7c2.2 0 4-1.8 4-4V27l12 16c1.5 2 3 3 5 3h8c2.2 0 4-1.8 4-4V13c0-2.2-1.8-4-4-4h-8c-2.2 0-4 1.8-4 4v12L28 12c-1.5-2-3-3-5-3z"/>\n  <rect x="10" y="50" width="44" height="7" rx="3.5" fill="#f4472e"/>\n</svg>\n';
+const faviconIco = Buffer.from(
+  "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",
+  "base64",
+);
+const appleTouchIcon = Buffer.from(
+  "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",
+  "base64",
+);
+
+export function browserMetadata(): Router {
+  const router = Router();
+  router.use((_request, response, next) => {
+    response.setHeader("X-Robots-Tag", "noindex, nofollow, noimageindex");
+    next();
+  });
+  router.get("/favicon.svg", (_request, response) => {
+    response
+      .type("image/svg+xml")
+      .set("Cache-Control", "public, max-age=86400")
+      .send(faviconSvg);
+  });
+  router.get("/favicon.ico", (_request, response) => {
+    response
+      .type("image/x-icon")
+      .set("Cache-Control", "public, max-age=86400")
+      .send(faviconIco);
+  });
+  router.get("/apple-touch-icon.png", (_request, response) => {
+    response
+      .type("image/png")
+      .set("Cache-Control", "public, max-age=86400")
+      .send(appleTouchIcon);
+  });
+  router.get("/robots.txt", (_request, response) => {
+    response
+      .type("text/plain")
+      .set("Cache-Control", "public, max-age=86400")
+      .send("User-agent: *\nDisallow: /\n");
+  });
+  return router;
+}
