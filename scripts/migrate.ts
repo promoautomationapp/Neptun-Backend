@@ -11,6 +11,9 @@ async function main(): Promise<void> {
       env.DATABASE_URL,
       env.DIRECT_DATABASE_URL,
     ),
+    connectionTimeoutMillis: 15_000,
+    lock_timeout: 60_000,
+    statement_timeout: 120_000,
   });
   await client.connect();
   try {

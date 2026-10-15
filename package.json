@@ -7,7 +7,7 @@
     "worker": "tsx src/worker.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/src/main.js",
-    "start:combined": "node dist/scripts/start-combined.js",
+    "start:combined": "node dist/scripts/migrate.js && node dist/scripts/start-combined.js",
     "start:worker": "node dist/src/worker.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src scripts tests",

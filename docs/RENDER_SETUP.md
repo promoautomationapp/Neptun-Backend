@@ -6,17 +6,17 @@ The database is Neon and media is in private Cloudflare R2. The existing Render 
 
 Connect the `Neptun-Backend` repository and choose the intended `main` branch. The backend is already at the repository root.
 
-| Setting            | Value                                   |
-| ------------------ | --------------------------------------- |
-| Name               | `neptun-backend`                        |
-| Language           | Node                                    |
-| Region             | Frankfurt                               |
-| Root directory     | Leave empty                             |
-| Build command      | `npm ci --include=dev && npm run build` |
-| Start command      | `npm run start:combined`                |
-| Health check path  | `/ready`                                |
-| Pre-deploy command | `node dist/scripts/migrate.js`          |
-| Persistent disk    | None; media is in R2                    |
+| Setting            | Value                                      |
+| ------------------ | ------------------------------------------ |
+| Name               | `neptun-backend`                           |
+| Language           | Node                                       |
+| Region             | Frankfurt                                  |
+| Root directory     | Leave empty                                |
+| Build command      | `npm ci --include=dev && npm run build`    |
+| Start command      | `npm run start:combined`                   |
+| Health check path  | `/ready`                                   |
+| Pre-deploy command | Leave empty; migrations run during startup |
+| Persistent disk    | None; media is in R2                       |
 
 The build explicitly includes development tools because TypeScript is needed during compilation even with `NODE_ENV=production`. Start and migration use compiled JavaScript. Existing applied migrations are checked and skipped safely; do not run demo seeding against the populated Neon database.
 
@@ -32,7 +32,7 @@ Ensure the local code changes have been committed and pushed by the repository o
 
 ## Combined API and worker
 
-`npm run start:combined` starts the worker, waits for its PostgreSQL readiness message, then starts the API. A startup failure or either child exiting fails the whole service so Render can restart it. SIGTERM drains both processes, with a 35-second shutdown deadline. The API receives a 192 MB JavaScript heap limit and the worker 160 MB; image processing uses one native thread and a 16 MB Sharp cache. These are heap/cache limits, not a guarantee of total process memory use. Watch Render memory under real workloads and move the worker to a separate service if usage requires it.
+`npm run start:combined` first checks and applies migrations, starts the worker, waits for its PostgreSQL readiness message, then starts the API. This avoids waiting for a separate Render pre-deploy container. A migration failure prevents either process from starting; connection, lock and statement waits have bounded timeouts. Existing applied migrations are checked by checksum and skipped. A startup failure or either child exiting fails the whole service so Render can restart it. SIGTERM drains both processes, with a 35-second shutdown deadline. The API receives a 192 MB JavaScript heap limit and the worker 160 MB; image processing uses one native thread and a 16 MB Sharp cache. These are heap/cache limits, not a guarantee of total process memory use. Watch Render memory under real workloads and move the worker to a separate service if usage requires it.
 
 The Render Start Command is `npm run start:combined`, using the supervisor committed in this repository. Keep startup code in the repository so it is reviewed, tested and built with the application. Deploy the matching source before selecting a new package script in Render.
 
