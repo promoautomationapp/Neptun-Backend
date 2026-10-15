@@ -130,17 +130,28 @@ describe("invitation-only workspace accounts", () => {
       .send({ email: addresses.invited, name: "Invited", role: "admin" })
       .expect(403);
     const list = (await admin.get("/api/team/users").expect(200)).body.users;
-    expect(list.find((x: { id: string }) => x.id === supportId)).toMatchObject({
-      isSupport: true,
-      role: "superadmin",
-    });
+    expect(JSON.stringify(list)).not.toContain(addresses.support);
+    expect(list.some((x: { id: string }) => x.id === supportId)).toBe(false);
+    const supportList = (await support.get("/api/team/users").expect(200)).body
+      .users;
+    expect(
+      supportList.find((x: { id: string }) => x.id === supportId),
+    ).toMatchObject({ isSupport: true, role: "superadmin" });
+    for (const agent of [admin, staff]) {
+      const members = (await agent.get("/api/team/members").expect(200)).body;
+      expect(JSON.stringify(members)).not.toContain(addresses.support);
+      expect(JSON.stringify(members)).not.toContain("superadmin");
+    }
+    expect(
+      JSON.stringify((await support.get("/api/team/members").expect(200)).body),
+    ).toContain(addresses.support);
     expect(list.some((x: { id: string }) => x.id === otherId)).toBe(false);
   });
   test("protected support accounts, tenant boundaries and last admin protection", async () => {
     await admin
       .patch(`/api/team/users/${supportId}`)
       .send({ status: "disabled" })
-      .expect(403);
+      .expect(404);
     await admin
       .patch(`/api/team/users/${otherId}`)
       .send({ name: "Wrong tenant" })
@@ -202,6 +213,103 @@ describe("invitation-only workspace accounts", () => {
       .patch(`/api/team/users/${invitedId}`)
       .send({ status: "active" })
       .expect(400);
+  });
+  test("both administrators can invite staff, PMs and other Neptun admins", async () => {
+    for (const [label, agent] of [
+      ["neptun", admin],
+      ["promo", support],
+    ] as const) {
+      for (const role of ["staff", "pm", "admin"]) {
+        const result = await agent
+          .post("/api/team/users/invite")
+          .send({
+            email: `${label}-${role}-${suffix}@example.test`,
+            name: `Invited ${role}`,
+            role,
+          })
+          .expect(201);
+        expect(result.body.user).toMatchObject({
+          role,
+          status: "invited",
+          emailVerified: false,
+          isSupport: false,
+        });
+      }
+    }
+  });
+  test("support identities stay private in shared documents and editing status without erasing the audit", async () => {
+    const id = randomUUID();
+    const saved = (
+      await support
+        .post("/api/team/campaigns")
+        .send({ campaign: { id, name: "Privacy QA", products: [] } })
+        .expect(201)
+    ).body.campaign;
+    expect(saved.updatedBy).toBe(addresses.support);
+    const comment = (
+      await support
+        .post(`/api/team/campaigns/${id}/review`)
+        .send({
+          action: "comment",
+          pageIndex: 0,
+          text: "Please check the price",
+          version: saved.version,
+        })
+        .expect(201)
+    ).body.campaign;
+    const publicDoc = (await admin.get(`/api/team/campaigns/${id}`).expect(200))
+      .body.campaign;
+    expect(JSON.stringify(publicDoc)).not.toContain(addresses.support);
+    expect(JSON.stringify(publicDoc)).not.toContain("superadmin");
+    expect(publicDoc.reviewComments[0].authorEmail).toBe("Workspace team");
+    expect(
+      JSON.stringify((await staff.get("/api/team/campaigns").expect(200)).body),
+    ).not.toContain(addresses.support);
+    await admin
+      .post(`/api/team/campaigns/${id}/review`)
+      .send({
+        action: "reply",
+        commentId: comment.reviewComments[0].id,
+        text: "Reply",
+        mention: addresses.support,
+        version: comment.version,
+      })
+      .expect(409);
+    const updated = (
+      await admin
+        .post("/api/team/campaigns")
+        .send({ campaign: { ...publicDoc, name: "Privacy QA edited" } })
+        .expect(201)
+    ).body;
+    expect(JSON.stringify(updated)).not.toContain(addresses.support);
+    const privateDoc = (
+      await support.get(`/api/team/campaigns/${id}`).expect(200)
+    ).body.campaign;
+    expect(privateDoc.reviewComments[0].authorEmail).toBe(addresses.support);
+    const sessionId = randomUUID();
+    await support
+      .post(`/api/team/campaigns/${id}/presence`)
+      .send({ sessionId, mode: "edit", pageLabel: "Cover" })
+      .expect(201);
+    const presence = (
+      await admin.get(`/api/team/campaigns/${id}/presence`).expect(200)
+    ).body;
+    expect(presence.participants).toEqual([
+      expect.objectContaining({
+        name: "Workspace team",
+        email: "",
+        mode: "edit",
+        pageLabel: "Cover",
+      }),
+    ]);
+    expect(JSON.stringify(presence)).not.toContain(addresses.support);
+    expect(JSON.stringify(presence)).not.toContain(supportId);
+    expect(
+      JSON.stringify(
+        (await support.get(`/api/team/campaigns/${id}/presence`).expect(200))
+          .body,
+      ),
+    ).toContain(addresses.support);
   });
   test("renaming a pending invite with an unchanged submitted role preserves its link", async () => {
     await admin

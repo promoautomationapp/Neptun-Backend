@@ -20,8 +20,8 @@ export class DocumentVisibility {
     const hidden = new Set(rows.map((row) => row.email.toLowerCase()));
     const isHidden = (identity: unknown) =>
       typeof identity === "string" && hidden.has(identity.toLowerCase());
-    const identity = (identity: unknown) =>
-      isHidden(identity) ? "Workspace team" : identity;
+    const identity = <V>(value: V): V =>
+      (isHidden(value) ? "Workspace team" : value) as V;
     const document = (item: Campaign | Post) => ({
       ...item,
       updatedBy: identity(item.updatedBy),
@@ -52,6 +52,7 @@ export class DocumentVisibility {
           }
         : {}),
     });
-    return (Array.isArray(value) ? value.map(document) : document(value)) as T;
+    // Only the string identity fields above change; the document shape is retained.
+    return (Array.isArray(value) ? value.map(document) : document(value)) as unknown as T;
   }
 }
