@@ -18,6 +18,8 @@ import { R2Storage } from "./modules/storage/r2.storage";
 import { generateVariants } from "./worker/variants.processor";
 import type { JsonObject } from "./shared/json";
 import { recoverInterruptedCatalogJobs } from "./worker/catalog-recovery";
+import { recoverInterruptedAiJobs } from "./worker/ai/recovery";
+import { registerAiConsumers } from "./worker/ai/consumer";
 
 async function main(): Promise<void> {
   const connectionString = directConnection(
@@ -43,6 +45,7 @@ async function main(): Promise<void> {
   await boss.createQueue("catalog-images");
   await boss.createQueue("catalog-brand-images");
   await recoverInterruptedCatalogJobs(db);
+  await recoverInterruptedAiJobs(db);
   await boss.work<{
     organizationId: string;
     brandId: number;
@@ -100,25 +103,20 @@ async function main(): Promise<void> {
     ["ai-text", env.AI_TEXT_CONCURRENCY],
   ] as const) {
     await boss.createQueue(queue);
-    await boss.work<JsonObject>(
+    await registerAiConsumers(
+      boss,
       queue,
-      {
-        batchSize: concurrency,
-        pollingIntervalSeconds: env.QUEUE_POLL_SECONDS,
-      },
-      async (jobs) => {
-        await Promise.all(
-          jobs.map((job) => {
-            const { organizationId } = z
-              .object({ organizationId: z.uuid() })
-              .parse(job.data);
-            return processAiJob(
-              db,
-              storage,
-              job.data,
-              new OpenAiProvider(db, storage, organizationId),
-            );
-          }),
+      concurrency,
+      Math.min(env.QUEUE_POLL_SECONDS, 2),
+      async (data) => {
+        const { organizationId } = z
+          .object({ organizationId: z.uuid() })
+          .parse(data);
+        return processAiJob(
+          db,
+          storage,
+          data,
+          new OpenAiProvider(db, storage, organizationId),
         );
       },
     );
@@ -173,19 +171,27 @@ async function main(): Promise<void> {
   const recoveryTimer = setInterval(() => {
     if (stopping || recovering) return;
     recovering = true;
-    void recoverInterruptedCatalogJobs(db)
-      .then((result) => {
-        if (result.requeued || result.failed)
-          logger.info(result, "Recovered interrupted catalog jobs");
+    void Promise.all([
+      recoverInterruptedCatalogJobs(db),
+      recoverInterruptedAiJobs(db),
+    ])
+      .then(([catalogResult, aiResult]) => {
+        if (catalogResult.requeued || catalogResult.failed)
+          logger.info(catalogResult, "Recovered interrupted catalog jobs");
+        if (aiResult.failed || aiResult.uncertain)
+          logger.info(aiResult, "Reconciled interrupted AI jobs");
       })
-      .catch((error) => logger.error({ err: error }, "Catalog recovery failed"))
+      .catch((error) => logger.error({ err: error }, "Queue recovery failed"))
       .finally(() => {
         recovering = false;
       });
   }, 30_000);
-  const timer = setInterval(() => {
-    void dispatch();
-  }, env.QUEUE_POLL_SECONDS * 1000);
+  const timer = setInterval(
+    () => {
+      void dispatch();
+    },
+    Math.min(env.QUEUE_POLL_SECONDS, 2) * 1000,
+  );
   logger.info("Neptun worker connected to PostgreSQL");
   const stop = async () => {
     stopping = true;

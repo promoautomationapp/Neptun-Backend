@@ -45,6 +45,9 @@ export interface AiJobRow {
   attempts: number;
   payload: JsonObject;
   last_error: string | null;
+  created_at: Date;
+  started_at: Date | null;
+  finished_at: Date | null;
 }
 export type AiTicket = {
   cached: boolean;

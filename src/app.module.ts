@@ -10,6 +10,7 @@ import { StorageModule } from "./modules/storage/storage.module";
 import { AssetsModule } from "./modules/assets/assets.module";
 import { ProductsModule } from "./modules/products/products.module";
 import { InsightsModule } from "./modules/insights/insights.module";
+import { ActivityModule } from "./modules/activity/activity.module";
 @Module({
   imports: [
     CqrsModule.forRoot(),
@@ -23,6 +24,7 @@ import { InsightsModule } from "./modules/insights/insights.module";
     AiModule,
     HealthModule,
     InsightsModule,
+    ActivityModule,
   ],
 })
 export class AppModule {}

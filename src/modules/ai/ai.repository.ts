@@ -271,6 +271,23 @@ export class AiRepository {
       status: row.status,
       attempts: row.attempts,
       error: row.last_error,
+      createdAt: row.created_at,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      elapsedSeconds: Math.max(
+        0,
+        Math.floor(
+          ((row.finished_at?.getTime() ?? Date.now()) -
+            (row.started_at ?? row.created_at).getTime()) /
+            1000,
+        ),
+      ),
+      stage:
+        row.status === "queued"
+          ? "queued"
+          : row.status === "running"
+            ? "preparing"
+            : "finished",
       result: result?.status === "completed" ? this.result(result) : null,
     };
   }

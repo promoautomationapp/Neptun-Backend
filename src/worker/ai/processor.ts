@@ -12,6 +12,7 @@ import {
 } from "../../modules/ai/domain/pricing";
 import { ProofreadReuse } from "./proofread-reuse";
 import { ProviderHttpError, ProviderUncertainError } from "./provider";
+import { providerRetryDelay } from "./retry-policy";
 const payloadSchema = z.object({ organizationId: z.uuid(), jobId: z.uuid() });
 export async function processAiJob(
   db: Database,
@@ -86,15 +87,28 @@ export async function processAiJob(
     );
     usageRecorded = true;
   };
-  const reuse =
-    result.operation === "proofread"
-      ? await ProofreadReuse.acquire(
-          db,
-          result,
-          row.payload.regenerate === true,
-        )
-      : null;
+  let reuse: ProofreadReuse | null = null;
+  const fail = async (uncertain: boolean, message: string) => {
+    await db.transaction(async (client) => {
+      const changed = await client.query(
+        "UPDATE ai_jobs SET status=$3,last_error=$4,finished_at=now() WHERE organization_id=$1 AND id=$2 AND status IN ('queued','running') RETURNING id",
+        [org, jobId, uncertain ? "uncertain" : "failed", message],
+      );
+      if (changed.rowCount)
+        await client.query(
+          "UPDATE ai_results SET status=$3 WHERE organization_id=$1 AND id=$2 AND status='pending'",
+          [org, result.id, uncertain ? "uncertain" : "failed"],
+        );
+    });
+    await reuse?.fail(uncertain);
+  };
   try {
+    if (result.operation === "proofread")
+      reuse = await ProofreadReuse.acquire(
+        db,
+        result,
+        row.payload.regenerate === true,
+      );
     for (let attempt = row.attempts; attempt < env.AI_MAX_ATTEMPTS; attempt++) {
       await db.query(
         "UPDATE ai_jobs SET attempts=attempts+1 WHERE organization_id=$1 AND id=$2",
@@ -169,44 +183,45 @@ export async function processAiJob(
         });
         return;
       } catch (error) {
+        const retryDelay =
+          error instanceof ProviderHttpError
+            ? providerRetryDelay(error.retryAfterMs, attempt)
+            : null;
         if (
           error instanceof ProviderHttpError &&
           (error.status === 429 || error.status >= 500) &&
-          attempt + 1 < env.AI_MAX_ATTEMPTS
+          attempt + 1 < env.AI_MAX_ATTEMPTS &&
+          retryDelay !== null
         ) {
           await db.query(
             "UPDATE ai_jobs SET last_error=$3 WHERE organization_id=$1 AND id=$2",
             [org, jobId, error.message],
           );
-          await new Promise<void>((resolve) =>
-            setTimeout(
-              resolve,
-              Math.max(error.retryAfterMs, 3000 * 2 ** attempt),
-            ),
-          );
+          await new Promise<void>((resolve) => setTimeout(resolve, retryDelay));
           continue;
         }
         const uncertain =
-          providerSucceeded || error instanceof ProviderUncertainError;
+          providerSucceeded ||
+          usageRecorded ||
+          error instanceof ProviderUncertainError;
         const message = uncertain
           ? "The provider response or result persistence was interrupted. Review before regenerating."
           : error instanceof ProviderHttpError
             ? error.message
             : "AI preparation failed. Review the source and retry explicitly.";
-        await reuse?.fail(uncertain);
-        await db.transaction(async (client) => {
-          await client.query(
-            "UPDATE ai_jobs SET status=$3,last_error=$4,finished_at=now() WHERE organization_id=$1 AND id=$2",
-            [org, jobId, uncertain ? "uncertain" : "failed", message],
-          );
-          await client.query(
-            "UPDATE ai_results SET status=$3 WHERE organization_id=$1 AND id=$2",
-            [org, result.id, uncertain ? "uncertain" : "failed"],
-          );
-        });
+        await fail(uncertain, message);
         return;
       }
     }
+    await fail(
+      false,
+      "The preparation attempt limit was reached. Use Retry to request a new version.",
+    );
+  } catch (error) {
+    await fail(
+      usageRecorded || error instanceof ProviderUncertainError,
+      "Preparation was interrupted. Review the result before explicitly retrying.",
+    );
   } finally {
     await reuse?.release();
   }

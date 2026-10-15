@@ -8,7 +8,10 @@ import { DocumentAssets } from "../../src/modules/assets/document-assets";
 import { AiRepository } from "../../src/modules/ai/ai.repository";
 import { LifestyleRepository } from "../../src/modules/ai/lifestyle.repository";
 import { processAiJob } from "../../src/worker/ai/processor";
-import { ProviderUncertainError } from "../../src/worker/ai/provider";
+import {
+  ProviderUncertainError,
+  ProviderHttpError,
+} from "../../src/worker/ai/provider";
 import type { AiProvider } from "../../src/worker/ai/provider";
 import type { Actor } from "../../src/modules/auth/domain/actor";
 import { env } from "../../src/config/environment";
@@ -206,6 +209,55 @@ describe("durable AI reuse and quotas", () => {
     }
     expect(run).toHaveBeenCalledTimes(1);
   });
+  test("a long provider cooldown releases the photo slot and exhausted attempts do not remain running", async () => {
+    const ticket = await repo.enqueue(actor, {
+      operation: "background",
+      params: { prompt: `Long cooldown ${randomUUID()}` },
+      regenerate: false,
+    });
+    const run = jest
+      .fn<ReturnType<AiProvider["run"]>, Parameters<AiProvider["run"]>>()
+      .mockRejectedValue(new ProviderHttpError(429, 3_600_000));
+    await processAiJob(
+      db,
+      storage,
+      { organizationId: actor.organizationId, jobId: ticket.jobId },
+      { run },
+    );
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(await repo.job(actor.organizationId, ticket.jobId!)).toMatchObject({
+      status: "failed",
+      stage: "finished",
+      attempts: 1,
+      createdAt: expect.any(Date),
+      startedAt: expect.any(Date),
+      finishedAt: expect.any(Date),
+    });
+    const exhausted = await repo.enqueue(actor, {
+      operation: "background",
+      params: { prompt: `Exhausted ${randomUUID()}` },
+      regenerate: false,
+    });
+    await db.query("UPDATE ai_jobs SET attempts=$2 WHERE id=$1", [
+      exhausted.jobId,
+      env.AI_MAX_ATTEMPTS,
+    ]);
+    run.mockClear();
+    await processAiJob(
+      db,
+      storage,
+      { organizationId: actor.organizationId, jobId: exhausted.jobId },
+      { run },
+    );
+    expect(run).not.toHaveBeenCalled();
+    expect(
+      await repo.job(actor.organizationId, exhausted.jobId!),
+    ).toMatchObject({
+      status: "failed",
+      stage: "finished",
+      error: expect.stringContaining("attempt limit"),
+    });
+  });
   test("an unsuccessful search is reusable and explicit retry creates one new version", async () => {
     const params = {
       code: "missing-840100",
@@ -231,11 +283,11 @@ describe("durable AI reuse and quotas", () => {
       { organizationId: actor.organizationId, jobId: first.jobId },
       { run },
     );
-      const cached = await repo.enqueue(actor, {
-        operation: "product_image_search",
-        params: { ...params, retry: false },
-        regenerate: false,
-      });
+    const cached = await repo.enqueue(actor, {
+      operation: "product_image_search",
+      params: { ...params, retry: false },
+      regenerate: false,
+    });
     expect(cached.status).toBe("succeeded");
     expect(cached.result).toEqual({
       found: false,

@@ -1,5 +1,7 @@
 # Brochure persistence and asset compatibility
 
+Historical 8 October report. The current editors and production API are integrated; see [MIGRATION_STATUS.md](MIGRATION_STATUS.md) for the 15 October status.
+
 Verified 8 October 2026 against the sibling frontend and the read-only reference project. These checks validate the backend document contract; they do not mark the unfinished editor migration or server export worker ready for production.
 
 ## Preserved document data
