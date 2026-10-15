@@ -17,8 +17,14 @@ import { campaignSchema, postSchema } from "./domain/document";
 import { identifier } from "../../shared/json";
 import { reviewInput } from "./domain/review";
 import { DocumentAssets } from "../assets/document-assets";
+import { DocumentVisibility } from "./document-visibility";
 import { DocumentsRepository } from "./documents.repository";
-import {CampaignPresenceController, CampaignPresenceRepository, CampaignPresenceCommandHandler, CampaignPresenceQueryHandler} from "./campaign-presence";
+import {
+  CampaignPresenceController,
+  CampaignPresenceRepository,
+  CampaignPresenceCommandHandler,
+  CampaignPresenceQueryHandler,
+} from "./campaign-presence";
 import {
   ListDocumentsQuery,
   GetDocumentQuery,
@@ -32,11 +38,15 @@ export class DocumentsController {
   constructor(
     @Inject(QueryBus) private readonly queries: QueryBus,
     @Inject(CommandBus) private readonly commands: CommandBus,
+    @Inject(DocumentVisibility) private readonly visibility: DocumentVisibility,
   ) {}
   @Get("campaigns") async campaigns(@Req() req: AuthenticatedRequest) {
     return {
-      campaigns: await this.queries.execute(
-        new ListDocumentsQuery(req.actor.organizationId, "campaign"),
+      campaigns: await this.visibility.forActor(
+        req.actor,
+        await this.queries.execute(
+          new ListDocumentsQuery(req.actor.organizationId, "campaign"),
+        ),
       ),
     };
   }
@@ -45,11 +55,14 @@ export class DocumentsController {
     @Param("id") id: string,
   ) {
     return {
-      campaign: await this.queries.execute(
-        new GetDocumentQuery(
-          req.actor.organizationId,
-          "campaign",
-          identifier.parse(id),
+      campaign: await this.visibility.forActor(
+        req.actor,
+        await this.queries.execute(
+          new GetDocumentQuery(
+            req.actor.organizationId,
+            "campaign",
+            identifier.parse(id),
+          ),
         ),
       ),
     };
@@ -60,8 +73,11 @@ export class DocumentsController {
   ) {
     const { campaign } = z.object({ campaign: campaignSchema }).parse(body);
     return {
-      campaign: await this.commands.execute(
-        new SaveDocumentCommand(req.actor, "campaign", campaign),
+      campaign: await this.visibility.forActor(
+        req.actor,
+        await this.commands.execute(
+          new SaveDocumentCommand(req.actor, "campaign", campaign),
+        ),
       ),
     };
   }
@@ -85,19 +101,25 @@ export class DocumentsController {
     @Body() body: unknown,
   ) {
     return {
-      campaign: await this.commands.execute(
-        new ReviewCampaignCommand(
-          req.actor,
-          identifier.parse(id),
-          reviewInput.parse(body),
+      campaign: await this.visibility.forActor(
+        req.actor,
+        await this.commands.execute(
+          new ReviewCampaignCommand(
+            req.actor,
+            identifier.parse(id),
+            reviewInput.parse(body),
+          ),
         ),
       ),
     };
   }
   @Get("posts") async posts(@Req() req: AuthenticatedRequest) {
     return {
-      posts: await this.queries.execute(
-        new ListDocumentsQuery(req.actor.organizationId, "post"),
+      posts: await this.visibility.forActor(
+        req.actor,
+        await this.queries.execute(
+          new ListDocumentsQuery(req.actor.organizationId, "post"),
+        ),
       ),
     };
   }
@@ -106,11 +128,14 @@ export class DocumentsController {
     @Param("id") id: string,
   ) {
     return {
-      post: await this.queries.execute(
-        new GetDocumentQuery(
-          req.actor.organizationId,
-          "post",
-          identifier.parse(id),
+      post: await this.visibility.forActor(
+        req.actor,
+        await this.queries.execute(
+          new GetDocumentQuery(
+            req.actor.organizationId,
+            "post",
+            identifier.parse(id),
+          ),
         ),
       ),
     };
@@ -121,8 +146,11 @@ export class DocumentsController {
   ) {
     const { post } = z.object({ post: postSchema }).parse(body);
     return {
-      post: await this.commands.execute(
-        new SaveDocumentCommand(req.actor, "post", post),
+      post: await this.visibility.forActor(
+        req.actor,
+        await this.commands.execute(
+          new SaveDocumentCommand(req.actor, "post", post),
+        ),
       ),
     };
   }
@@ -143,7 +171,15 @@ export class DocumentsController {
 }
 @Module({
   controllers: [DocumentsController, CampaignPresenceController],
-  providers: [DocumentsRepository, DocumentAssets, CampaignPresenceRepository, CampaignPresenceCommandHandler, CampaignPresenceQueryHandler, ...documentHandlers],
+  providers: [
+    DocumentVisibility,
+    DocumentsRepository,
+    DocumentAssets,
+    CampaignPresenceRepository,
+    CampaignPresenceCommandHandler,
+    CampaignPresenceQueryHandler,
+    ...documentHandlers,
+  ],
   exports: [DocumentsRepository],
 })
 export class DocumentsModule {}

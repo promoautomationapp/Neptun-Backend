@@ -1,6 +1,6 @@
 # Invitation-only team access
 
-Neptun Broshura uses database-backed sessions and tenant-scoped memberships. Existing staff and PM accounts remain available. There is no public sign-up endpoint. Administrators can invite staff, PMs and other Neptun administrators, edit names/roles, resend pending invitations and deactivate/reactivate verified users. Support superadmins are shown in the user list but cannot be modified by Neptun admins. At least one active Neptun admin must remain. Support accounts are added only by an operator-controlled bootstrap, never by the admin invitation API.
+Neptun Broshura uses database-backed sessions and tenant-scoped memberships. Existing staff and PM accounts remain available. There is no public sign-up endpoint. Administrators can invite staff, PMs and other Neptun administrators, edit names/roles, resend pending invitations and deactivate/reactivate verified users. Support superadmins are visible only to other superadmins. Neptun users do not receive support identities in team lists, mention pickers, document activity or collaboration presence. Support activity uses a generic workspace label while the original audit identity remains stored. At least one active Neptun admin must remain. Support accounts are added only by an operator-controlled bootstrap, never by the admin invitation API.
 
 ## Email setup
 
@@ -28,6 +28,8 @@ Invitation links use `/account/invitation?token=...` and expire after 48 hours. 
 ## Delivery and operations
 
 Account emails are committed to an encrypted database outbox in the same transaction as the account change. Tokens/code payloads are AES-256-GCM encrypted using a key derived from `SESSION_SECRET`; the token/code columns themselves store HMAC digests. Keep that secret stable, protected and backed up. API instances claim outbox messages with database locks every two seconds. Resend requests use the outbox ID as an idempotency key. SMTP uses a stable Message-ID for each outbox row; this supports tracing but cannot guarantee exactly-once delivery after an ambiguous connection timeout. Transient failures retry up to six times with a two-minute delay. Permanent provider rejections stop retrying. Provider failures are stored as sanitized categories, never raw SMTP responses. Verification emails are not delivered after their code expires. New queued links/codes replace older pending messages for that recipient and kind. Sent payloads are erased; failed-message metadata is available in `email_outbox`.
+
+The two provisioned default administrators retain their verified password access without an invitation or a new email verification. Email configuration affects new invitations and password recovery, not these existing logins.
 
 An unconfigured sender is visible as `emailConfigured:false` in the administrator API; invitation creation/resending and code delivery fail explicitly with 503. Forgot-password retains its generic response, and cannot send until email is configured. Password-change notices remain durable in the outbox until a sender is configured. API success for a code request means the message is queued, not that the recipient's mail server has delivered it.
 

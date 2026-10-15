@@ -202,8 +202,8 @@ export class DocumentsRepository {
         });
       const members = (
         await client.query<{ email: string }>(
-          "SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1",
-          [actor.organizationId],
+          "SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.status='active' AND ($2 OR m.account_role<>'superadmin')",
+          [actor.organizationId, actor.accountRole === "superadmin"],
         )
       ).rows.map((x) => x.email);
       const campaign = applyReview(

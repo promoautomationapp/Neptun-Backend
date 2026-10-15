@@ -70,10 +70,10 @@ export class AuthRepository {
       this.tokenHash(token),
     ]);
   }
-  async members(organizationId: string) {
+  async members(organizationId: string, includeSupport = false) {
     return this.db.query<{ email: string; role: string }>(
-      "SELECT u.email,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END role FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.status='active' ORDER BY u.email",
-      [organizationId],
+      "SELECT u.email,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END role FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.status='active' AND ($2 OR m.account_role<>'superadmin') ORDER BY u.email",
+      [organizationId, includeSupport],
     );
   }
   private actor(row: UserRow): Actor {
