@@ -89,10 +89,7 @@ export class AuthController {
   async members(@Req() request: AuthenticatedRequest) {
     return {
       members: await this.queries.execute(
-        new MembersQuery(
-          request.actor.organizationId,
-          request.actor.accountRole === "superadmin",
-        ),
+        new MembersQuery(request.actor.organizationId),
       ),
     };
   }

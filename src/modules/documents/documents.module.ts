@@ -11,6 +11,7 @@ import {
   Inject,
 } from "@nestjs/common";
 import { z } from "zod";
+import { NotificationsModule } from "../notifications/notifications.module";
 import { CommandBus, QueryBus } from "@nestjs/cqrs";
 import type { AuthenticatedRequest } from "../auth/domain/actor";
 import { campaignSchema, postSchema } from "./domain/document";
@@ -229,6 +230,7 @@ export class DocumentsController {
   }
 }
 @Module({
+  imports: [NotificationsModule],
   controllers: [DocumentsController, CampaignPresenceController],
   providers: [
     DocumentVisibility,

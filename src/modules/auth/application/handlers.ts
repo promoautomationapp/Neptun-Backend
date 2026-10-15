@@ -77,11 +77,10 @@ export class SessionHandler implements IQueryHandler<SessionQuery> {
     return this.repository.session(query.token);
   }
 }
-export class MembersQuery extends Query<{ email: string; role: string }[]> {
-  constructor(
-    readonly organizationId: string,
-    readonly includeSupport = false,
-  ) {
+export class MembersQuery extends Query<
+  { id: string; name: string; email: string; role: string; username: string }[]
+> {
+  constructor(readonly organizationId: string) {
     super();
   }
 }
@@ -91,6 +90,6 @@ export class MembersHandler implements IQueryHandler<MembersQuery> {
     @Inject(AuthRepository) private readonly repository: AuthRepository,
   ) {}
   execute(query: MembersQuery) {
-    return this.repository.members(query.organizationId, query.includeSupport);
+    return this.repository.members(query.organizationId);
   }
 }

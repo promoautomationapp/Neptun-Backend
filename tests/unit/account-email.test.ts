@@ -97,3 +97,28 @@ describe("account email rendering", () => {
     expect(() => decryptEmail(chunks.join("."))).toThrow();
   });
 });
+
+test("mention email safely renders the comment, campaign, page and deep link with a readable alternative", () => {
+  const email = accountEmail({
+    to: "staff@example.test",
+    name: "Arta",
+    kind: "workspace-notification",
+    url: "https://workspace.test/?campaign=october&page=1&comment=thread",
+    notification: {
+      id: "notification-id",
+      campaignName: "October <offers>",
+      actorName: "Besa",
+      message: 'Please check <img src=x onerror="bad()"> & prices',
+      pageIndex: 1,
+    },
+  });
+  expect(email.subject).toContain("Besa mentioned you");
+  expect(email.html).not.toContain("<img src=x");
+  expect(email.html).toContain("&lt;img src=x");
+  expect(email.html).toContain("max-width:480px");
+  expect(email.html).toContain('width="600"');
+  expect(email.html).toContain("View comment");
+  expect(email.text).toContain("Page 2");
+  expect(email.text).toContain("campaign=october&page=1&comment=thread");
+  expect(email.html).not.toContain("ACCOUNT SECURITY");
+});

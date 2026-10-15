@@ -317,3 +317,112 @@ describe("durable incremental catalog refresh", () => {
     ).toBe(false);
   });
 });
+
+describe("authoritative category facets and complete pagination", () => {
+  const db = new Database();
+  afterAll(async () => {
+    await db.onModuleDestroy();
+  });
+  test("reads overlapping pages to every unique product and retains empty website branches in scoped facets", async () => {
+    const org = (
+      await db.query<{ id: string }>(
+        "INSERT INTO organizations(name,slug) VALUES('Deep catalog test',$1) RETURNING id",
+        [randomUUID()],
+      )
+    )[0]!.id;
+    const otherOrg = (
+      await db.query<{ id: string }>(
+        "INSERT INTO organizations(name,slug) VALUES('Other catalog test',$1) RETURNING id",
+        [randomUUID()],
+      )
+    )[0]!.id;
+    await db.query(
+      "INSERT INTO catalog_source_categories(organization_id,source_id,name,path,source_url) VALUES($1,999,'Private branch','Private branch','https://www.neptun-ks.com/private.nspx')",
+      [otherOrg],
+    );
+    const categoryMenu =
+      '<nav id="mainNMenu"><ul><li id="webshop_root"><a>Produktet</a><ul><li><a data-label-parent="home.nspx">IT</a><ul><li><a href="/accessories.nspx">AKSESORË</a><ul><li><a href="/mouse.nspx">Mouse</a><ul><li><a href="/pads.nspx">Mouse Pad</a></li><li><a href="/empty.nspx">Empty branch</a></li></ul></li></ul></li></ul></li></ul></li></ul></nav>';
+    const products = [1, 2, 3, 4].map((number) => ({
+      ...model(String(number), `Pad ${number}`),
+      Category: { Id: 263, Name: "Mouse Pad", Url: "mouse-pad" },
+      NavigationPath: [{ Name: "IT" }, { Name: "Mouse Pad" }],
+    }));
+    const padPages: number[] = [];
+    const transport: SourceTransport = {
+      async get(value) {
+        if (value === "https://www.neptun-ks.com/") return categoryMenu;
+        const url = new URL(value);
+        if (url.pathname === "/pads.nspx") {
+          const page = Number(url.searchParams.get("page"));
+          padPages.push(page);
+          return html("categorydetails", {
+            Id: 263,
+            ParentId: 83,
+            NumberOfProducts: 4,
+            Products:
+              page === 1
+                ? [products[0], products[1]]
+                : page === 2
+                  ? [products[1], products[2]]
+                  : [products[3]],
+          });
+        }
+        if (url.pathname.endsWith(".nspx"))
+          return html("categorydetails", {
+            Id:
+              url.pathname === "/empty.nspx"
+                ? 264
+                : url.pathname === "/mouse.nspx"
+                  ? 83
+                  : 65,
+            ParentId: 83,
+            NumberOfProducts: 0,
+            Products: [],
+          });
+        return html(
+          "productModel",
+          products.find((product) =>
+            url.pathname.endsWith(String("Url" in product ? product.Url : "")),
+          ),
+        );
+      },
+    };
+    const repository = new CatalogRepository(db);
+    const run = await repository.enqueue(org, "manual");
+    await processCatalogRefresh(
+      db,
+      { organizationId: org, runId: run.runId! },
+      transport,
+    );
+    expect(padPages).toEqual([1, 2, 3]);
+    expect((await repository.status(org)).status).toBe("completed");
+    const rows = await db.query<{ code: string; category_path: string }>(
+      "SELECT code,category_path FROM products WHERE organization_id=$1 ORDER BY code",
+      [org],
+    );
+    expect(rows.map((row) => row.code)).toEqual(["1", "2", "3", "4"]);
+    expect(
+      rows.every(
+        (row) => row.category_path === "IT > AKSESORË > Mouse > Mouse Pad",
+      ),
+    ).toBe(true);
+    const facets = await new ProductsRepository(db).facets(org);
+    expect(
+      facets.sourceCategories.find((category) => category.id === 264),
+    ).toMatchObject({
+      parentId: 83,
+      name: "Empty branch",
+      categoryPath: "IT > AKSESORË > Mouse > Empty branch",
+      path: ["IT", "AKSESORË", "Mouse", "Empty branch"],
+      url: "https://www.neptun-ks.com/empty.nspx",
+    });
+    expect(
+      facets.sourceCategories.every((category) => category.id !== 999),
+    ).toBe(true);
+    expect(
+      facets.sourceCategories.every(
+        (category) => !Number.isNaN(Date.parse(category.lastSeenAt)),
+      ),
+    ).toBe(true);
+  });
+});

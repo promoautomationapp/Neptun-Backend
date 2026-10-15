@@ -12,10 +12,20 @@ export const reviewInput = z.object({
     .object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) })
     .optional(),
   commentId: z.string().optional(),
-  mention: z.string().optional(),
+  mention: z.string().max(320).optional(),
+  mentions: z.array(z.string().max(320)).max(20).optional(),
   version: z.number().int().positive().optional(),
 });
 export type ReviewInput = z.infer<typeof reviewInput>;
+export function reviewMentions(input: ReviewInput): string[] {
+  return [
+    ...new Set(
+      [...(input.mentions ?? []), input.mention ?? ""]
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ];
+}
 export function applyReview(
   campaign: Campaign,
   actor: Actor,
@@ -36,14 +46,14 @@ export function applyReview(
     reviewHistory: [...campaign.reviewHistory],
   };
   const now = new Date().toISOString();
-  const mention = input.mention?.trim().toLowerCase() || null;
+  const mentions = reviewMentions(input);
+  const mention = mentions[0] ?? null;
   function deny(message: string): never {
     throw new ConflictException(message);
   }
   if (
     (action === "comment" || action === "reply") &&
-    mention &&
-    !members.includes(mention)
+    (mentions.length > 20 || mentions.some((email) => !members.includes(email)))
   )
     deny("Choose a team member to mention.");
   if (action === "comment") {
@@ -57,6 +67,7 @@ export function applyReview(
       authorEmail: actor.email,
       createdAt: now,
       mention,
+      mentions,
       position: input.position ?? null,
       replies: [],
       fixed: false,
@@ -76,6 +87,7 @@ export function applyReview(
         authorEmail: actor.email,
         createdAt: now,
         mention,
+        mentions,
       });
     } else {
       if (role !== "staff" && !administrator)

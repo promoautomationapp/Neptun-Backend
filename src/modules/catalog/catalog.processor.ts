@@ -65,6 +65,7 @@ export async function processCatalogRefresh(
         let read = 0;
         let pages = 1;
         const pageSignatures = new Set<string>();
+        const listingCodes = new Set<string>();
         do {
           const url = new URL(listing.url);
           url.searchParams.set("items", "100");
@@ -76,7 +77,11 @@ export async function processCatalogRefresh(
           const items = model.Products;
           if (!Array.isArray(items))
             throw new Error("Invalid category products.");
-          expected = Number(model.NumberOfProducts) || 0;
+          expected = Number(model.NumberOfProducts);
+          if (!Number.isSafeInteger(expected) || expected < 0)
+            throw new Error(
+              "Neptun category has no valid total product count.",
+            );
           if (page === 1) {
             listing.id = Number(model.Id) || 0;
             listing.parentId = Number(model.ParentId) || 0;
@@ -94,11 +99,14 @@ export async function processCatalogRefresh(
             const code = normalizeProductCode(item.CodeNumber);
             if (!code)
               throw new Error("A listing product has no product code.");
+            listingCodes.add(code);
             const previous = collected.get(code);
             if (!previous || listing.path.length > previous.path.length)
               collected.set(code, { model: item, path: listing.path });
           }
-          read += items.length;
+          // Do not count overlapping website pages as additional products.
+          // Pagination completes only after every unique category code is seen.
+          read = listingCodes.size;
           pages = Math.max(1, Math.ceil(expected / (items.length || 100)));
           if (!items.length && read < expected)
             throw new Error(

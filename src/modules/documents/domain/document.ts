@@ -13,6 +13,7 @@ export const replySchema = z
     authorEmail: z.string(),
     createdAt: z.string(),
     mention: z.string().nullable().optional(),
+    mentions: z.array(z.string()).max(20).optional(),
   })
   .catchall(jsonValue);
 export const commentSchema = z
@@ -24,6 +25,7 @@ export const commentSchema = z
     authorEmail: z.string(),
     createdAt: z.string(),
     mention: z.string().nullable().optional(),
+    mentions: z.array(z.string()).max(20).optional(),
     position: z.object({ x: z.number(), y: z.number() }).nullable().optional(),
     replies: z.array(replySchema).default([]),
     fixed: z.boolean().default(false),

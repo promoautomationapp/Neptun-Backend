@@ -8,6 +8,7 @@ import {
 import type { PoolClient } from "pg";
 import { Database } from "../../database/database";
 import type { Actor } from "../auth/domain/actor";
+import { NotificationsRepository } from "../notifications/notifications.repository";
 import { DocumentAssets } from "../assets/document-assets";
 import {
   campaignSchema,
@@ -30,6 +31,8 @@ export class DocumentsRepository {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(DocumentAssets) private readonly assets: DocumentAssets,
+    @Inject(NotificationsRepository)
+    private readonly notifications: NotificationsRepository,
   ) {}
   async list(
     organizationId: string,
@@ -318,8 +321,8 @@ export class DocumentsRepository {
         });
       const members = (
         await client.query<{ email: string }>(
-          "SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.status='active' AND ($2 OR m.account_role<>'superadmin')",
-          [actor.organizationId, actor.accountRole === "superadmin"],
+          "SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.status='active' AND m.account_role<>'superadmin' AND u.email_verified_at IS NOT NULL",
+          [actor.organizationId],
         )
       ).rows.map((x) => x.email);
       const campaign = applyReview(
@@ -342,6 +345,7 @@ export class DocumentsRepository {
         campaign,
       );
       await this.projections(client, actor.organizationId, campaign);
+      await this.notifications.review(client, actor, campaign, input);
       return campaign;
     });
   }

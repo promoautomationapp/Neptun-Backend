@@ -33,10 +33,24 @@ export class DocumentVisibility {
                 authorEmail: identity(comment.authorEmail),
                 fixedBy: identity(comment.fixedBy),
                 mention: isHidden(comment.mention) ? null : comment.mention,
+                ...(comment.mentions
+                  ? {
+                      mentions: comment.mentions.filter(
+                        (email) => !isHidden(email),
+                      ),
+                    }
+                  : {}),
                 replies: comment.replies.map((reply) => ({
                   ...reply,
                   authorEmail: identity(reply.authorEmail),
                   mention: isHidden(reply.mention) ? null : reply.mention,
+                  ...(reply.mentions
+                    ? {
+                        mentions: reply.mentions.filter(
+                          (email) => !isHidden(email),
+                        ),
+                      }
+                    : {}),
                 })),
               }),
             ),
@@ -53,6 +67,8 @@ export class DocumentVisibility {
         : {}),
     });
     // Only the string identity fields above change; the document shape is retained.
-    return (Array.isArray(value) ? value.map(document) : document(value)) as unknown as T;
+    return (Array.isArray(value)
+      ? value.map(document)
+      : document(value)) as unknown as T;
   }
 }

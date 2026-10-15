@@ -13,6 +13,7 @@ import {
 import type { PoolClient } from "pg";
 import { Database } from "../../database/database";
 import { env } from "../../config/environment";
+import { notificationAudit } from "../notifications/notification-audit";
 import { accountEmail } from "./templates";
 import type { AccountEmail } from "./templates";
 import { AccountEmailTransport, safeEmailFailure } from "./email-transport";
@@ -57,7 +58,10 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       );
   }
   async enqueue(client: PoolClient, message: AccountEmail): Promise<void> {
-    if (message.kind !== "password-changed") {
+    if (
+      message.kind !== "password-changed" &&
+      message.kind !== "workspace-notification"
+    ) {
       await client.query(
         "UPDATE email_outbox SET status='failed',error='Replaced by a newer account email.',encrypted_payload='' WHERE recipient=$1 AND kind=$2 AND status='pending'",
         [message.to, message.kind],
@@ -77,8 +81,15 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       };
     }
     await client.query(
-      "INSERT INTO email_outbox(recipient,kind,encrypted_payload) VALUES($1,$2,$3)",
-      [message.to, message.kind, encryptEmail(message)],
+      "INSERT INTO email_outbox(recipient,kind,encrypted_payload,notification_id) VALUES($1,$2,$3,$4) ON CONFLICT(notification_id) WHERE notification_id IS NOT NULL DO NOTHING",
+      [
+        message.to,
+        message.kind,
+        encryptEmail(message),
+        message.kind === "workspace-notification"
+          ? message.notification?.id
+          : null,
+      ],
     );
   }
   onModuleInit(): void {
@@ -106,18 +117,32 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       }
       if (!this.configured) return;
       await this.db.query(
-        "UPDATE email_outbox SET status='failed',error='Delivery attempt limit reached.',encrypted_payload='' WHERE status='sending' AND attempts>=6 AND next_attempt_at<=now()",
+        `WITH exhausted AS (
+          UPDATE email_outbox SET status='failed',error='Delivery attempt limit reached.',encrypted_payload=''
+          WHERE status='sending' AND attempts>=6 AND next_attempt_at<=now() RETURNING id,notification_id
+        ) INSERT INTO activity_audit(organization_id,actor_id,actor_role,action,target_type,target_id,method,route,status_code,duration_ms,request_id,event_key)
+          SELECT n.organization_id,n.actor_id,n.actor_role,'notification.email-failed','notification',n.id::text,'POST','/api/notifications',502,0,gen_random_uuid(),'notification-email:'||e.id::text||':failed'
+          FROM exhausted e JOIN workspace_notifications n ON n.id=e.notification_id
+          ON CONFLICT(organization_id,event_key) WHERE event_key IS NOT NULL DO NOTHING`,
       );
       const rows = await this.db.query<{
         id: string;
         encrypted_payload: string;
         attempts: number;
+        notification_id?: string | null;
       }>(
         // Lease one message at a time: later messages cannot lose their lease while
         // waiting behind slow SMTP requests in this process.
-        "UPDATE email_outbox SET status='sending',attempts=attempts+1,next_attempt_at=now()+interval '2 minutes' WHERE id IN (SELECT id FROM email_outbox WHERE status IN ('pending','sending') AND next_attempt_at<=now() AND attempts<6 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,encrypted_payload,attempts",
+        "UPDATE email_outbox SET status='sending',attempts=attempts+1,next_attempt_at=now()+interval '2 minutes' WHERE id IN (SELECT id FROM email_outbox WHERE status IN ('pending','sending') AND next_attempt_at<=now() AND attempts<6 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,encrypted_payload,attempts,notification_id",
       );
       for (const row of rows) {
+        let notification:
+          | {
+              organization_id: string;
+              actor_id: string | null;
+              actor_role: string;
+            }
+          | undefined;
         try {
           const message = decryptEmail(row.encrypted_payload);
           if (
@@ -130,26 +155,79 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
             );
             continue;
           }
+          if (message.kind === "workspace-notification") {
+            [notification] = await this.db.query<{
+              organization_id: string;
+              actor_id: string | null;
+              actor_role: string;
+            }>(
+              `SELECT n.organization_id,n.actor_id,n.actor_role FROM workspace_notifications n
+               JOIN campaigns c ON c.organization_id=n.organization_id AND c.id=n.campaign_id
+               JOIN memberships m ON m.organization_id=n.organization_id AND m.user_id=n.recipient_id
+               JOIN users u ON u.id=m.user_id
+               WHERE n.id=$1 AND c.deleted_at IS NULL AND m.status='active' AND m.account_role<>'superadmin'
+               AND u.email_verified_at IS NOT NULL AND u.email=$2`,
+              [row.notification_id ?? message.notification?.id, message.to],
+            );
+            if (!notification) {
+              await this.db.query(
+                "UPDATE email_outbox SET status='failed',error='Notification recipient or brochure is no longer available.',encrypted_payload='' WHERE id=$1",
+                [row.id],
+              );
+              continue;
+            }
+          }
           const content = accountEmail(message);
           const providerId = await this.transport.send(
             row.id,
             message,
             content,
           );
-          await this.db.query(
-            "UPDATE email_outbox SET status='sent',sent_at=now(),provider_id=$2,error=NULL,encrypted_payload='' WHERE id=$1",
-            [row.id, providerId],
-          );
+          const deliveredNotification = notification;
+          if (deliveredNotification) {
+            await this.db.transaction(async (client) => {
+              await client.query(
+                "UPDATE email_outbox SET status='sent',sent_at=now(),provider_id=$2,error=NULL,encrypted_payload='' WHERE id=$1",
+                [row.id, providerId],
+              );
+              await notificationAudit(client, {
+                organizationId: deliveredNotification.organization_id,
+                actorId: deliveredNotification.actor_id,
+                actorRole: deliveredNotification.actor_role,
+                action: "notification.email-sent",
+                notificationId: row.notification_id ?? message.notification!.id,
+                eventKey: `notification-email:${row.id}:sent`,
+              });
+            });
+          } else
+            await this.db.query(
+              "UPDATE email_outbox SET status='sent',sent_at=now(),provider_id=$2,error=NULL,encrypted_payload='' WHERE id=$1",
+              [row.id, providerId],
+            );
         } catch (error) {
           const failure = safeEmailFailure(error);
-          await this.db.query(
-            "UPDATE email_outbox SET status=$2,error=$3,encrypted_payload=CASE WHEN $2='failed' THEN '' ELSE encrypted_payload END,next_attempt_at=now()+interval '2 minutes' WHERE id=$1",
-            [
-              row.id,
-              failure.permanent || row.attempts >= 6 ? "failed" : "pending",
-              failure.message,
-            ],
-          );
+          const terminal = failure.permanent || row.attempts >= 6;
+          const failureSql =
+            "UPDATE email_outbox SET status=$2,error=$3,encrypted_payload=CASE WHEN $2='failed' THEN '' ELSE encrypted_payload END,next_attempt_at=now()+interval '2 minutes' WHERE id=$1";
+          const values = [
+            row.id,
+            terminal ? "failed" : "pending",
+            failure.message,
+          ];
+          if (notification && terminal) {
+            const failedNotification = notification;
+            await this.db.transaction(async (client) => {
+              await client.query(failureSql, values);
+              await notificationAudit(client, {
+                organizationId: failedNotification.organization_id,
+                actorId: failedNotification.actor_id,
+                actorRole: failedNotification.actor_role,
+                action: "notification.email-failed",
+                notificationId: row.notification_id!,
+                eventKey: `notification-email:${row.id}:failed`,
+              });
+            });
+          } else await this.db.query(failureSql, values);
         }
       }
     } finally {

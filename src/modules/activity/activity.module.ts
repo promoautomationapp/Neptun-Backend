@@ -88,6 +88,8 @@ export function activityEntry(request: Request): Entry | null {
   const route = raw.split("?")[0] ?? "";
   if (!/^\/api\/[A-Za-z0-9_/:.-]+$/.test(route) || route.includes("/presence"))
     return null;
+  // Notification acknowledgements are audited once per changed row in their transaction.
+  if (route.startsWith("/api/notifications")) return null;
   const body = object(request.body),
     params = object(request.params);
   const id = identifier(params.id);

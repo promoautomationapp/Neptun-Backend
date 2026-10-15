@@ -144,7 +144,7 @@ describe("invitation-only workspace accounts", () => {
     }
     expect(
       JSON.stringify((await support.get("/api/team/members").expect(200)).body),
-    ).toContain(addresses.support);
+    ).not.toContain(addresses.support);
     expect(list.some((x: { id: string }) => x.id === otherId)).toBe(false);
   });
   test("protected support accounts, tenant boundaries and last admin protection", async () => {

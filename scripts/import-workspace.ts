@@ -8,6 +8,8 @@ import { env } from "../src/config/environment";
 import { LocalStorage } from "../src/modules/storage/local.storage";
 import { R2Storage } from "../src/modules/storage/r2.storage";
 import { DocumentAssets } from "../src/modules/assets/document-assets";
+import { EmailService } from "../src/modules/email/email.service";
+import { NotificationsRepository } from "../src/modules/notifications/notifications.repository";
 import { DocumentsRepository } from "../src/modules/documents/documents.repository";
 import {
   campaignSchema,
@@ -53,7 +55,11 @@ async function main(): Promise<void> {
       mustChangePassword: true,
     };
     const assets = new DocumentAssets(db, storage);
-    const documents = new DocumentsRepository(db, assets);
+    const documents = new DocumentsRepository(
+      db,
+      assets,
+      new NotificationsRepository(db, new EmailService(db)),
+    );
     const embeddedHashes = new Set<string>();
     const collectImages = (value: unknown): void => {
       if (Array.isArray(value)) {

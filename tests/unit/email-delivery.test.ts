@@ -15,21 +15,41 @@ beforeEach(() => {
   env.MAIL_FROM = "sender@example.test";
   env.RESEND_API_KEY = "test-api-key";
 });
-function fixture(message: AccountEmail, attempts = 1) {
+function fixture(
+  message: AccountEmail,
+  attempts = 1,
+  activeNotification = false,
+) {
   const query = jest.fn(async (sql: string) =>
-    sql.includes("RETURNING id,encrypted_payload,attempts")
+    sql.includes("SELECT n.organization_id") && activeNotification
       ? [
           {
-            id: "outbox-id",
-            encrypted_payload: encryptEmail(message),
-            attempts,
+            organization_id: "org-id",
+            actor_id: "actor-id",
+            actor_role: "staff",
           },
         ]
-      : [],
+      : sql.includes("RETURNING id,encrypted_payload,attempts")
+        ? [
+            {
+              id: "outbox-id",
+              encrypted_payload: encryptEmail(message),
+              attempts,
+              notification_id: message.notification?.id ?? null,
+            },
+          ]
+        : [],
   );
-  const service = new EmailService({ query } as unknown as Database);
+  const transaction = jest.fn(
+    async (operation: (client: unknown) => Promise<unknown>) =>
+      operation({ query }),
+  );
+  const service = new EmailService({
+    query,
+    transaction,
+  } as unknown as Database);
   jest.spyOn(service, "configured", "get").mockReturnValue(true);
-  return { service, query };
+  return { service, query, transaction };
 }
 afterEach(() => {
   jest.restoreAllMocks();
@@ -132,4 +152,79 @@ test("network errors are sanitized before saving retry status", async () => {
   expect(
     updates.find(([sql]) => sql.includes("SET status=$2,error=$3"))?.[1],
   ).toEqual(["outbox-id", "pending", "Email delivery failed. Please retry."]);
+});
+
+const workspaceMessage: AccountEmail = {
+  to: "staff@example.test",
+  name: "Staff",
+  kind: "workspace-notification",
+  url: "https://workspace.test/?campaign=brochure&page=1&comment=thread",
+  notification: {
+    id: "notification-id",
+    campaignName: "October brochure",
+    actorName: "Arta",
+    message: "Please check",
+    pageIndex: 1,
+  },
+};
+test("queued mention delivery rechecks access and suppresses unavailable recipients without contacting the provider", async () => {
+  const { service, query } = fixture(workspaceMessage);
+  const send = jest
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(new Response("{}"));
+  await service.deliverPending();
+  expect(send).not.toHaveBeenCalled();
+  expect(
+    query.mock.calls.some(
+      ([sql]) =>
+        sql.includes("m.status='active'") &&
+        sql.includes("m.account_role<>'superadmin'") &&
+        sql.includes("c.deleted_at IS NULL"),
+    ),
+  ).toBe(true);
+  expect(
+    query.mock.calls.some(([sql]) =>
+      sql.includes(
+        "Notification recipient or brochure is no longer available.",
+      ),
+    ),
+  ).toBe(true);
+});
+test("mention delivery records one durable delivery event together with its outbox acknowledgement", async () => {
+  const { service, query, transaction } = fixture(workspaceMessage, 1, true);
+  const send = jest
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(
+      new Response(JSON.stringify({ id: "provider-id" }), { status: 200 }),
+    );
+  await service.deliverPending();
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(transaction).toHaveBeenCalledTimes(1);
+  const calls = query.mock.calls as unknown as Array<[string, unknown[]]>;
+  const audit = calls.find(([, values]) =>
+    values?.includes("notification.email-sent"),
+  );
+  expect(audit?.[1]).toEqual(
+    expect.arrayContaining([
+      "notification.email-sent",
+      "notification-email:outbox-id:sent",
+    ]),
+  );
+  expect(audit?.[0]).toContain("ON CONFLICT(organization_id,event_key)");
+});
+test("exhausted mention delivery records a safe failure event and stops retries", async () => {
+  const { service, query } = fixture(workspaceMessage, 6, true);
+  jest
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(new Response("private credentials", { status: 429 }));
+  await service.deliverPending();
+  const calls = query.mock.calls as unknown as Array<[string, unknown[]]>;
+  expect(
+    calls.find(([, values]) =>
+      values?.includes("notification.email-failed"),
+    )?.[1],
+  ).toEqual(expect.arrayContaining(["notification.email-failed"]));
+  expect(
+    calls.find(([sql]) => sql.includes("SET status=$2,error=$3"))?.[1],
+  ).toEqual(["outbox-id", "failed", "Email provider returned 429."]);
 });
