@@ -722,6 +722,131 @@ describe("durable AI reuse and quotas", () => {
     expect(regenerated.resultId).not.toBe(first.resultId);
     expect((await repo.enqueue(actor, input)).resultId).toBe(first.resultId);
   });
+  test("one explicit regeneration command survives simultaneous posts, repository restarts and a lost completion response", async () => {
+    const commandId = randomUUID();
+    const input = {
+      operation: "background" as const,
+      regenerate: true,
+      commandId,
+      params: { prompt: `Regenerate once ${randomUUID()}`, commandId },
+    };
+    const tickets = await Promise.all(
+      Array.from({ length: 12 }, () => repo.enqueue(actor, input)),
+    );
+    expect(new Set(tickets.map((ticket) => ticket.jobId)).size).toBe(1);
+    const first = tickets[0];
+    if (!first?.jobId) throw new Error("No regeneration job.");
+    expect(tickets.filter((ticket) => !ticket.cached)).toHaveLength(1);
+    const nextSession = new AiRepository(
+      db,
+      new DocumentAssets(db, storage),
+      quota,
+    );
+    const reattached = await nextSession.enqueue(actor, input);
+    expect(reattached.jobId).toBe(first.jobId);
+    expect(reattached.cached).toBe(true);
+    expect(
+      (
+        await db.query<{ count: string }>(
+          "SELECT count(*)::text count FROM job_outbox WHERE organization_id=$1 AND job_key=$2",
+          [actor.organizationId, `ai:${first.jobId}`],
+        )
+      )[0]?.count,
+    ).toBe("1");
+    const run = jest
+      .fn<ReturnType<AiProvider["run"]>, Parameters<AiProvider["run"]>>()
+      .mockResolvedValue({
+        bytes: png,
+        mimeType: "image/png",
+        json: {},
+        inputTokens: 10,
+        outputTokens: 10,
+        costUsd: null,
+      });
+    await processAiJob(
+      db,
+      storage,
+      { organizationId: actor.organizationId, jobId: first.jobId },
+      { run },
+    );
+    env.OPENAI_API_KEY = "";
+    const completed = await nextSession.enqueue(actor, input);
+    expect(completed.status).toBe("succeeded");
+    expect(completed.resultId).toBe(first.resultId);
+    expect(completed.cached).toBe(true);
+    expect(completed.result?.image).toMatch(/^\/api\/assets\//);
+    expect(run).toHaveBeenCalledTimes(1);
+    env.OPENAI_API_KEY = "mock-key-for-tests";
+    const newCommand = await nextSession.enqueue(actor, {
+      ...input,
+      commandId: randomUUID(),
+    });
+    expect(newCommand.resultId).not.toBe(first.resultId);
+    expect(newCommand.cached).toBe(false);
+    const stored = (
+      await db.query<{ params_json: Record<string, unknown> }>(
+        "SELECT params_json FROM ai_results WHERE id=$1",
+        [first.resultId],
+      )
+    )[0];
+    expect(stored?.params_json).not.toHaveProperty("commandId");
+  });
+  test("an uncertain regeneration command never repeats provider work and another actor cannot consume its command identity", async () => {
+    const input = {
+      operation: "background" as const,
+      regenerate: true,
+      commandId: randomUUID(),
+      params: { prompt: `Uncertain regeneration ${randomUUID()}` },
+    };
+    const first = await repo.enqueue(actor, input);
+    const run = jest
+      .fn<ReturnType<AiProvider["run"]>, Parameters<AiProvider["run"]>>()
+      .mockRejectedValue(new ProviderUncertainError());
+    await processAiJob(
+      db,
+      storage,
+      { organizationId: actor.organizationId, jobId: first.jobId },
+      { run },
+    );
+    const nextSession = new AiRepository(
+      db,
+      new DocumentAssets(db, storage),
+      quota,
+    );
+    await expect(nextSession.enqueue(actor, input)).rejects.toMatchObject({
+      response: { code: "AI_RESULT_UNCERTAIN", resultId: first.resultId },
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+    const otherUser = (
+      await db.query<{ id: string }>(
+        "INSERT INTO users(email,password_hash) VALUES($1,'unused') RETURNING id",
+        [`${randomUUID()}@example.test`],
+      )
+    )[0]?.id;
+    if (!otherUser) throw new Error("Second actor missing.");
+    const other = await nextSession.enqueue(
+      { ...actor, userId: otherUser },
+      input,
+    );
+    expect(other.resultId).not.toBe(first.resultId);
+    expect(other.cached).toBe(false);
+  });
+  test("command identities do not alter normal prepared-result reuse", async () => {
+    const input = {
+      operation: "background" as const,
+      regenerate: false,
+      commandId: randomUUID(),
+      params: { prompt: `Normal command metadata ${randomUUID()}` },
+    };
+    const first = await repo.enqueue(actor, input);
+    const again = await repo.enqueue(actor, {
+      ...input,
+      commandId: randomUUID(),
+    });
+    expect(again.cached).toBe(true);
+    expect(again.jobId).toBe(first.jobId);
+    expect(again.resultId).toBe(first.resultId);
+  });
   test("proofreading results are isolated between organizations", async () => {
     const slug = randomUUID();
     const org = (

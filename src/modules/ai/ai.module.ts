@@ -164,6 +164,7 @@ export class AiController {
         operation,
         params,
         regenerate: params.retry === true || params.regenerate === true,
+        commandId: params.commandId,
       },
       res,
     );

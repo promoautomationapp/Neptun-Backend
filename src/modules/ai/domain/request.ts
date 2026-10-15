@@ -18,6 +18,7 @@ export const aiRequestSchema = z.object({
   operation: z.enum(operations),
   params: jsonObject,
   regenerate: z.boolean().default(false),
+  commandId: z.uuid().optional(),
 });
 export type AiRequest = z.infer<typeof aiRequestSchema>;
 export interface AiResultRow {

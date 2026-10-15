@@ -110,7 +110,15 @@ export class AiRepository {
       model,
       quality,
       promptVersion: version,
-      ...(request.regenerate ? { nonce: randomUUID() } : {}),
+      ...(request.regenerate
+        ? {
+            // A transport retry of the same explicit action must reattach to
+            // its durable job rather than purchase another provider request.
+            nonce: request.commandId
+              ? `${actor.userId}:${request.commandId}`
+              : randomUUID(),
+          }
+        : {}),
     });
     const fields =
       request.operation === "proofread"
