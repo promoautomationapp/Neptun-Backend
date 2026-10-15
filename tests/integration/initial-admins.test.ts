@@ -29,16 +29,16 @@ describe("operator-provisioned initial administrators", () => {
     await db.onModuleDestroy();
   });
 
-  test("creates two separate salted hashes, scoped roles and required first password changes", async () => {
+  test("creates two regular admin logins with separate salted hashes and scoped roles", async () => {
     await provisionInitialAdmins(db, {
       ...emails,
       ...organization,
       credentialFile,
     });
     initialBytes = await readFile(credentialFile, "utf8");
-    const passwords = [
-      ...initialBytes.matchAll(/Temporary password: (.+)/g),
-    ].map((match) => match[1]!);
+    const passwords = [...initialBytes.matchAll(/Password: (.+)/g)].map(
+      (match) => match[1]!,
+    );
     expect(passwords).toHaveLength(2);
     expect(passwords[0]).not.toBe(passwords[1]);
     expect((await stat(credentialFile)).mode & 0o777).toBe(0o600);
@@ -56,7 +56,7 @@ describe("operator-provisioned initial administrators", () => {
     expect(users).toHaveLength(2);
     for (const [index, user] of users.entries()) {
       expect(user.password_hash).toMatch(/^\$argon2id\$/);
-      expect(user.must_change_password).toBe(true);
+      expect(user.must_change_password).toBe(false);
       expect(user.status).toBe("active");
       expect(await verify(user.password_hash, passwords[index]!)).toBe(true);
     }

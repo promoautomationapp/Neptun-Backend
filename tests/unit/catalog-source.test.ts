@@ -81,6 +81,49 @@ describe("Neptun authoritative catalog parsing", () => {
     expect(() => productModel({ Title: "TV" }, [])).toThrow("stable code");
     expect(() => siteUrl("https://example.com/image.jpg")).toThrow("Untrusted");
   });
+  test("keeps product details and photos when a gallery includes YouTube videos", () => {
+    const product = productModel(
+      {
+        CodeNumber: "84052013",
+        Title: "PHILIPS FC9351/01",
+        Url: "PHILIPS-FC9351-01",
+        Category: { Url: "fshese_elektrike1" },
+        ShortDescription: "* Fuqia: 900 W",
+        Thumbnail: "2019/09/20/9351.jpg",
+        Images: [
+          {
+            Type: "video",
+            RelativePath: "https://img.youtube.com/vi/example/0.jpg",
+          },
+          { Type: " VIDEO ", url: "https://youtu.be/example" },
+          { Type: null, RelativePath: "2019/09/20/9351.jpg" },
+          { RelativePath: "2019/09/20/9351.1.jpg" },
+        ],
+      },
+      ["ELEKTROSHTËPIAKE TË VOGLA", "FSHESE ELEKTRIKE"],
+    );
+    expect(product.specs.Fuqia).toBe("900 W");
+    expect(product.imageUrls).toEqual([
+      "https://www.neptun-ks.com/2019/09/20/9351.jpg",
+      "https://www.neptun-ks.com/2019/09/20/9351.1.jpg",
+    ]);
+  });
+  test("still rejects external photos when video entries are excluded", () => {
+    expect(() =>
+      productModel(
+        {
+          CodeNumber: "84052013",
+          Title: "Product",
+          Url: "product",
+          Images: [
+            { Type: "video", url: "https://youtu.be/example" },
+            { Type: null, RelativePath: "https://example.com/photo.jpg" },
+          ],
+        },
+        [],
+      ),
+    ).toThrow("Untrusted Neptun URL");
+  });
   test("does not mark missing on incomplete, empty or suspiciously smaller crawls", () => {
     expect(healthyFullCrawl(2000, 2300, 0)).toBe(true);
     expect(healthyFullCrawl(2000, 1000, 0)).toBe(false);

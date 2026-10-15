@@ -65,8 +65,8 @@ export async function provisionInitialAdmins(
         [organizationId, settings],
       );
       const credentials: string[] = [
-        "Neptun Broshura — initial administrator credentials",
-        "Each account must choose a new password before accessing the workspace.",
+        "Neptun Broshura — default administrator credentials",
+        "These two operator-approved default accounts use regular password login.",
         "The Neptun address is a login identifier; recovery email requires a working mailbox.",
       ];
       for (const account of accounts) {
@@ -78,7 +78,7 @@ export async function provisionInitialAdmins(
           parallelism: 1,
         });
         const result = await client.query<{ id: string }>(
-          "INSERT INTO users(email,name,password_hash,must_change_password,email_verified_at) VALUES($1,$2,$3,true,now()) RETURNING id",
+          "INSERT INTO users(email,name,password_hash,must_change_password,email_verified_at) VALUES($1,$2,$3,false,now()) RETURNING id",
           [account.email, account.name, passwordHash],
         );
         const userId = result.rows[0]!.id;
@@ -94,7 +94,7 @@ export async function provisionInitialAdmins(
             {
               role: account.role,
               verification: "operator",
-              mustChangePassword: true,
+              mustChangePassword: false,
             },
           ],
         );
@@ -102,7 +102,7 @@ export async function provisionInitialAdmins(
           "",
           account.name,
           `Email: ${account.email}`,
-          `Temporary password: ${password}`,
+          `Password: ${password}`,
         );
       }
       await file.writeFile(credentials.join("\n") + "\n", "utf8");

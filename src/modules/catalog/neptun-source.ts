@@ -247,6 +247,16 @@ function retail(value: unknown): number | null {
     ? result
     : null;
 }
+/** Video thumbnails share the Images array with photos in Neptun's model. */
+export function productGalleryImages(images: SiteObject[] = []): SiteObject[] {
+  return images.filter(
+    (image) =>
+      String(image.Type ?? "")
+        .trim()
+        .toLowerCase() !== "video",
+  );
+}
+
 export function productModel(
   model: SiteObject,
   fallbackPath: string[],
@@ -305,7 +315,7 @@ export function productModel(
     ...new Set(
       [
         model.Thumbnail,
-        ...(model.Images ?? []).map(
+        ...productGalleryImages(model.Images).map(
           (x: SiteObject) => x.RelativePath || x.url || x.Url,
         ),
       ]
