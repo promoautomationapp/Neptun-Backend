@@ -46,6 +46,14 @@ describe("settings contracts", () => {
     expect(settings.brochure.showCoverLogo).toBe(false);
     expect(settings.brochure.storesBackground.color).toBe("#ffffff");
   });
+  test("validates editable product defaults without changing older saved documents", () => {
+    const value = resolveSettings({ productDesign: { photo: { mode: "custom", x: 40, scale: 1.2 }, details: { fill: "outline" } }, brochure: { automaticProductLayout: false } });
+    expect(value).toMatchObject({ productDesign: { photo: { mode: "custom", x: 40, y: 50, scale: 1.2 }, details: { fill: "outline", placement: "automatic" } }, brochure: { automaticProductLayout: false } });
+    expect(workspaceSettingsSchema.safeParse({ productDesign: { photo: { scale: 10 } } }).success).toBe(false);
+    expect(workspaceSettingsSchema.safeParse({ productDesign: { typography: { font: "url(unsafe)" } } }).success).toBe(false);
+    expect(workspaceSettingsSchema.safeParse({ productDesign: { divider: { color: "red;display:none" } } }).success).toBe(false);
+    expect(workspaceSettingsSchema.safeParse({ productDesign: { grid: { horizontal: -1 } } }).success).toBe(false);
+  });
   test("rejects invalid dimensions, savings choices, hidden defaults and external assets", () => {
     const settings = resolveSettings(null);
     expect(

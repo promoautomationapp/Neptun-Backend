@@ -50,9 +50,72 @@ export const FORMAT_IDS = [
   "a4Landscape",
   "a3Landscape",
 ] as const;
+export const customBrochureFormatSchema = z
+  .object({
+    id: z.string().regex(/^custom-[a-z0-9-]{1,90}$/),
+    name: z.string().trim().min(1).max(120),
+    width: z.number().int().min(64).max(8192),
+    height: z.number().int().min(64).max(8192),
+    visible: z.boolean().default(true),
+  })
+  .refine((item) => item.width * item.height <= 40_000_000, {
+    path: ["width"],
+    message: "Custom dimensions must be 40 megapixels or smaller.",
+  });
+/** Editable product artwork defaults, snapshotted into each new brochure. */
+export const productDesignSchema = z.object({
+  photo: z
+    .object({
+      mode: z.enum(["automatic", "custom"]).default("automatic"),
+      x: z.number().min(0).max(100).default(50),
+      y: z.number().min(0).max(100).default(50),
+      scale: z.number().min(0.2).max(2.5).default(1),
+      automaticTvSizing: z.boolean().default(true),
+    })
+    .prefault({}),
+  details: z
+    .object({
+      placement: z.enum(["automatic", "left", "bottom"]).default("automatic"),
+      fill: z.enum(["automatic", "filled", "outline"]).default("automatic"),
+    })
+    .prefault({}),
+  typography: z
+    .object({
+      font: z
+        .enum(["automatic", "SkolaSans", "TSTAR", "Arial"])
+        .default("automatic"),
+      nameScale: z.number().min(0.7).max(1.5).default(1),
+      codeScale: z.number().min(0.7).max(1.5).default(1),
+      detailScale: z.number().min(0.7).max(1.5).default(1),
+    })
+    .prefault({}),
+  priceScale: z.number().min(0.6).max(1.5).default(1),
+  savingsScale: z.number().min(0.6).max(1.5).default(1),
+  divider: z
+    .object({
+      visible: z.boolean().default(true),
+      thickness: z.number().min(0.5).max(8).nullable().default(null),
+      color: color.default(""),
+      lightColor: color.default(""),
+      gap: z.number().min(0).max(30).default(2),
+    })
+    .prefault({}),
+  grid: z
+    .object({
+      mode: z.enum(["automatic", "custom"]).default("automatic"),
+      horizontal: z.number().min(0).max(12).default(3.1),
+      vertical: z.number().min(0).max(12).default(3.2),
+      content: z.number().min(0).max(8).default(1),
+    })
+    .prefault({}),
+});
+export type ProductDesignDefaults = z.infer<typeof productDesignSchema>;
 export const brochureDefaultsSchema = z
   .object({
-    format: z.enum(FORMAT_IDS).default("neptun1080x1350"),
+    format: z
+      .union([z.enum(FORMAT_IDS), z.string().regex(/^custom-[a-z0-9-]{1,90}$/)])
+      .default("neptun1080x1350"),
+    automaticProductLayout: z.boolean().default(true),
     layout: z
       .enum(["grid6portrait", "grid6", "grid9", "classic8", "duo4"])
       .default("grid6portrait"),
@@ -127,6 +190,7 @@ export const brochureDefaultsSchema = z
 export const workspaceSettingsSchema = z
   .object({
     schemaVersion: z.literal(1).default(1),
+    customFormats: z.array(customBrochureFormatSchema).max(100).default([]),
     stores: z
       .array(
         z
@@ -148,6 +212,36 @@ export const workspaceSettingsSchema = z
       .default("current"),
     savingMode: savingMode.default("amount"),
     brochure: brochureDefaultsSchema.prefault({}),
+    productDesign: productDesignSchema.prefault({}),
+    hiddenBuiltinLogos: z.array(z.string().max(100)).max(100).default([]),
+    logoRules: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(100),
+            target: z.enum(["cover", "pages", "both"]).default("both"),
+            background: z.enum(["light", "dark", "color"]).default("dark"),
+            color: color.default(""),
+            image: source.refine(
+              Boolean,
+              "Choose a logo for the background rule.",
+            ),
+            enabled: z.boolean().default(true),
+          })
+          .superRefine((rule, ctx) => {
+            if (
+              rule.background === "color" &&
+              !/^#[0-9a-f]{6}$/i.test(rule.color)
+            )
+              ctx.addIssue({
+                code: "custom",
+                path: ["color"],
+                message: "Choose the background color for this logo.",
+              });
+          }),
+      )
+      .max(50)
+      .default([]),
     logoLibrary: z
       .array(
         z.object({
@@ -169,11 +263,15 @@ export const workspaceSettingsSchema = z
         }),
       )
       .default({}),
-    automaticSavings: z.object({
-      enabled: z.boolean().default(true),
-      amountThreshold: z.number().min(0).max(100000).default(50),
-    }).prefault({}),
-    categoryPathSavingModes: z.record(z.string().max(1600), savingMode).default({}),
+    automaticSavings: z
+      .object({
+        enabled: z.boolean().default(true),
+        amountThreshold: z.number().min(0).max(100000).default(50),
+      })
+      .prefault({}),
+    categoryPathSavingModes: z
+      .record(z.string().max(1600), savingMode)
+      .default({}),
     categorySavingModes: z
       .record(
         z.string().max(200),
@@ -198,7 +296,12 @@ export const workspaceSettingsSchema = z
   })
   .catchall(json)
   .superRefine((value, ctx) => {
-    for (const key of ["stores", "campaignTypes", "logoLibrary"] as const) {
+    for (const key of [
+      "stores",
+      "campaignTypes",
+      "logoLibrary",
+      "customFormats",
+    ] as const) {
       const ids = value[key]
         .map((item) => item.id)
         .filter((id) => id !== undefined);
@@ -209,6 +312,26 @@ export const workspaceSettingsSchema = z
           message: "Every item must have a unique ID.",
         });
     }
+    if (
+      value.brochure.format.startsWith("custom-") &&
+      !value.customFormats.some(
+        (item) => item.id === value.brochure.format && item.visible,
+      )
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["brochure", "format"],
+        message: "Choose a visible custom format or a built-in format.",
+      });
+    const formatNames = value.customFormats.map((item) =>
+      item.name.toLocaleLowerCase(),
+    );
+    if (new Set(formatNames).size !== formatNames.length)
+      ctx.addIssue({
+        code: "custom",
+        path: ["customFormats"],
+        message: "Custom format names must be unique.",
+      });
     const names = value.campaignTypes.map((item) =>
       item.name.toLocaleLowerCase(),
     );
@@ -230,6 +353,9 @@ export const workspaceSettingsSchema = z
         message: "Choose a visible default campaign type, or leave it empty.",
       });
   });
+export type LogoRule = z.infer<
+  typeof workspaceSettingsSchema
+>["logoRules"][number];
 export type WorkspaceSettings = z.infer<typeof workspaceSettingsSchema>;
 export type BrochureDefaults = z.infer<typeof brochureDefaultsSchema>;
 export type LogoAsset = WorkspaceSettings["logoLibrary"][number];

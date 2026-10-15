@@ -1,4 +1,5 @@
 {
+  "customFormats": [],
   "offerStyle": "current",
   "savingMode": "amount",
   "stores": [
@@ -232,7 +233,42 @@
     }
   ],
   "defaultCampaignTypeId": "campaign-type-1",
+  "productDesign": {
+    "photo": {
+      "mode": "automatic",
+      "x": 50,
+      "y": 50,
+      "scale": 1,
+      "automaticTvSizing": true
+    },
+    "details": {
+      "placement": "automatic",
+      "fill": "automatic"
+    },
+    "typography": {
+      "font": "automatic",
+      "nameScale": 1,
+      "codeScale": 1,
+      "detailScale": 1
+    },
+    "priceScale": 1,
+    "savingsScale": 1,
+    "divider": {
+      "visible": true,
+      "thickness": null,
+      "color": "",
+      "lightColor": "",
+      "gap": 2
+    },
+    "grid": {
+      "mode": "automatic",
+      "horizontal": 3.1,
+      "vertical": 3.2,
+      "content": 1
+    }
+  },
   "brochure": {
+    "automaticProductLayout": true,
     "format": "neptun1080x1350",
     "layout": "grid6portrait",
     "coverTemplate": "blueRibbon",
@@ -288,5 +324,7 @@
       "blueBand": "#e7eae9",
       "saving": "#ef4023"
     }
-  }
+  },
+  "hiddenBuiltinLogos": [],
+  "logoRules": []
 }
