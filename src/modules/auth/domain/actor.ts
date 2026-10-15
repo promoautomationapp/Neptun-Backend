@@ -1,3 +1,5 @@
+import type { WorkspaceAccess } from "./workspace-access";
+import { actorWorkspaceAccess } from "./workspace-access";
 import type { Request } from "express";
 export interface Actor {
   userId: string;
@@ -8,6 +10,7 @@ export interface Actor {
   role: "admin" | "editor" | "reviewer";
   reviewRole: "staff" | "pm";
   mustChangePassword: boolean;
+  access?: WorkspaceAccess;
 }
 export interface AuthenticatedRequest extends Request {
   actor: Actor;
@@ -23,5 +26,6 @@ export function publicUser(actor: Actor) {
     organizationId: actor.organizationId,
     permissions: actor.role,
     mustChangePassword: actor.mustChangePassword,
+    access: actorWorkspaceAccess(actor),
   };
 }

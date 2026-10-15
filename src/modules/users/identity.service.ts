@@ -18,6 +18,11 @@ import {
 import type { PoolClient } from "pg";
 import { Database } from "../../database/database";
 import { env } from "../../config/environment";
+import {
+  resolvedWorkspaceAccess,
+  storedWorkspaceAccess,
+} from "../auth/domain/workspace-access";
+import type { WorkspaceAccess } from "../auth/domain/workspace-access";
 import type { Actor } from "../auth/domain/actor";
 import { EmailService } from "../email/email.service";
 export type AccountRole = "staff" | "pm" | "admin" | "superadmin";
@@ -31,6 +36,7 @@ interface UserRow {
   created_at: Date;
   last_login_at: Date | null;
   email_verified_at: Date | null;
+  workspace_access?: WorkspaceAccess | null;
 }
 interface TokenRow {
   id: string;
@@ -63,6 +69,7 @@ const userView = (row: UserRow) => ({
   createdAt: row.created_at,
   lastLoginAt: row.last_login_at,
   emailVerified: Boolean(row.email_verified_at),
+  access: resolvedWorkspaceAccess(row.account_role, row.workspace_access),
 });
 const administrative = (actor: Actor) =>
   actor.accountRole === "admin" || actor.accountRole === "superadmin";
@@ -96,7 +103,7 @@ export class IdentityService {
   async list(actor: Actor) {
     this.assertAdmin(actor);
     const rows = await this.db.query<UserRow>(
-      "SELECT u.id,u.email,u.name,u.created_at,u.last_login_at,u.email_verified_at,m.account_role,m.status,m.invited_at FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND ($2 OR m.account_role<>'superadmin') ORDER BY CASE m.account_role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 WHEN 'pm' THEN 2 ELSE 3 END,u.email",
+      "SELECT u.id,u.email,u.name,u.created_at,u.last_login_at,u.email_verified_at,m.account_role,m.status,m.invited_at,m.workspace_access FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND ($2 OR m.account_role<>'superadmin') ORDER BY CASE m.account_role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 WHEN 'pm' THEN 2 ELSE 3 END,u.email",
       [actor.organizationId, actor.accountRole === "superadmin"],
     );
     return { users: rows.map(userView), emailConfigured: this.mail.configured };
@@ -151,12 +158,19 @@ export class IdentityService {
       email: string;
       name: string;
       role: Exclude<AccountRole, "superadmin">;
+      access?: WorkspaceAccess | null;
     },
   ) {
     this.assertAdmin(actor);
     this.mail.requireConfigured();
     await this.rateLimit(`invite:${actor.userId}`, 30, 3600);
     return this.db.transaction(async (client) => {
+      const access = await storedWorkspaceAccess(
+        client,
+        actor.organizationId,
+        input.role,
+        input.access,
+      );
       const found = await client.query(
         "SELECT id FROM users WHERE lower(email)=lower($1)",
         [input.email],
@@ -177,13 +191,14 @@ export class IdentityService {
       if (!user) throw new Error("Could not create invitation.");
       const permission = rolePermissions(input.role);
       await client.query(
-        "INSERT INTO memberships(organization_id,user_id,role,review_role,account_role,status,invited_at) VALUES($1,$2,$3,$4,$5,'invited',now())",
+        "INSERT INTO memberships(organization_id,user_id,role,review_role,account_role,status,invited_at,workspace_access) VALUES($1,$2,$3,$4,$5,'invited',now(),$6)",
         [
           actor.organizationId,
           user.id,
           permission.role,
           permission.reviewRole,
           input.role,
+          access,
         ],
       );
       const token = await this.createToken(
@@ -205,10 +220,10 @@ export class IdentityService {
         user.id,
         actor.organizationId,
         "user.invited",
-        { role: input.role },
+        { role: input.role, access },
       );
       const rows = await client.query<UserRow>(
-        "SELECT u.*,m.account_role,m.status,m.invited_at FROM users u JOIN memberships m ON m.user_id=u.id WHERE u.id=$1 AND m.organization_id=$2",
+        "SELECT u.*,m.account_role,m.status,m.invited_at,m.workspace_access FROM users u JOIN memberships m ON m.user_id=u.id WHERE u.id=$1 AND m.organization_id=$2",
         [user.id, actor.organizationId],
       );
       return { user: userView(rows.rows[0]!) };
@@ -221,6 +236,7 @@ export class IdentityService {
       name?: string;
       role?: Exclude<AccountRole, "superadmin">;
       status?: "active" | "disabled";
+      access?: WorkspaceAccess | null;
     },
   ) {
     this.assertAdmin(actor);
@@ -229,7 +245,7 @@ export class IdentityService {
         `users:${actor.organizationId}`,
       ]);
       const found = await client.query<UserRow>(
-        "SELECT u.*,m.account_role,m.status,m.invited_at FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND u.id=$2 FOR UPDATE OF m,u",
+        "SELECT u.*,m.account_role,m.status,m.invited_at,m.workspace_access FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND u.id=$2 FOR UPDATE OF m,u",
         [actor.organizationId, id],
       );
       const target = found.rows[0];
@@ -252,6 +268,12 @@ export class IdentityService {
         );
       const nextRole = input.role ?? target.account_role;
       const nextStatus = input.status ?? target.status;
+      const access = await storedWorkspaceAccess(
+        client,
+        actor.organizationId,
+        nextRole,
+        input.access === undefined ? target.workspace_access : input.access,
+      );
       if (
         actor.accountRole !== "superadmin" &&
         target.account_role === "admin" &&
@@ -273,7 +295,7 @@ export class IdentityService {
         [id, input.name ?? null],
       );
       await client.query(
-        "UPDATE memberships SET account_role=$3,role=$4,review_role=$5,status=$6 WHERE organization_id=$1 AND user_id=$2",
+        "UPDATE memberships SET account_role=$3,role=$4,review_role=$5,status=$6,workspace_access=$7 WHERE organization_id=$1 AND user_id=$2",
         [
           actor.organizationId,
           id,
@@ -281,6 +303,7 @@ export class IdentityService {
           permission.role,
           permission.reviewRole,
           nextStatus,
+          access,
         ],
       );
       if (nextRole !== target.account_role || nextStatus !== target.status) {
@@ -307,6 +330,7 @@ export class IdentityService {
           name: input.name ?? target.name,
           account_role: nextRole,
           status: nextStatus,
+          workspace_access: access,
         }),
       };
     });
@@ -317,7 +341,7 @@ export class IdentityService {
     await this.rateLimit(`resend:${id}`, 5, 3600);
     return this.db.transaction(async (client) => {
       const result = await client.query<UserRow>(
-        "SELECT u.*,m.account_role,m.status,m.invited_at FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND u.id=$2 FOR UPDATE OF m",
+        "SELECT u.*,m.account_role,m.status,m.invited_at,m.workspace_access FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND u.id=$2 FOR UPDATE OF m",
         [actor.organizationId, id],
       );
       const user = result.rows[0];

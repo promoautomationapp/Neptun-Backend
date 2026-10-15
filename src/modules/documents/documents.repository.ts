@@ -9,6 +9,7 @@ import type { PoolClient } from "pg";
 import { Database } from "../../database/database";
 import type { Actor } from "../auth/domain/actor";
 import { NotificationsRepository } from "../notifications/notifications.repository";
+import { requireWorkspaceAccess } from "../auth/domain/workspace-access";
 import { DocumentAssets } from "../assets/document-assets";
 import {
   campaignSchema,
@@ -66,6 +67,7 @@ export class DocumentsRepository {
     input: Campaign | Post,
     importing = false,
   ): Promise<Campaign | Post> {
+    if (kind === "post") requireWorkspaceAccess(actor, "canViewSocialPosts");
     const parsed =
       kind === "campaign"
         ? campaignSchema.parse(input)
@@ -178,6 +180,10 @@ export class DocumentsRepository {
     id: string,
     version?: number,
   ): Promise<{ deleted: boolean }> {
+    requireWorkspaceAccess(
+      actor,
+      kind === "campaign" ? "canDisableBrochures" : "canViewSocialPosts",
+    );
     return this.db.transaction(async (client) => {
       await this.lock(client, actor.organizationId, kind, id);
       const row = (

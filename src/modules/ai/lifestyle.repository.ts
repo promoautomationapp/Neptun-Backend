@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import type { PoolClient } from "pg";
+import type { Actor } from "../auth/domain/actor";
+import { requireSocialContextAccess } from "../auth/domain/workspace-access";
 import { Database } from "../../database/database";
 import { env } from "../../config/environment";
 import { belgradeMonth } from "./domain/request";
@@ -72,11 +74,15 @@ export class LifestyleRepository {
         env.LIFESTYLE_MONTHLY_LIMIT,
     });
   }
-  async accept(org: string, resultId: string) {
+  async accept(org: string, resultId: string, actor?: Actor) {
     return this.db.transaction(async (client) => {
       const result = (
-        await client.query<{ status: string; operation: string }>(
-          "SELECT status,operation FROM ai_results WHERE organization_id=$1 AND id=$2",
+        await client.query<{
+          status: string;
+          operation: string;
+          params_json: { context?: unknown };
+        }>(
+          "SELECT status,operation,params_json FROM ai_results WHERE organization_id=$1 AND id=$2",
           [org, resultId],
         )
       ).rows[0];
@@ -86,6 +92,7 @@ export class LifestyleRepository {
         result.status !== "completed"
       )
         throw new NotFoundException("A completed lifestyle image is required.");
+      if (actor) requireSocialContextAccess(actor, result.params_json.context);
       // Lock before checking acceptance, so repeated concurrent acceptance is idempotent.
       const month = belgradeMonth();
       const row = await this.lock(client, org, month);

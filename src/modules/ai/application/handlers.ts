@@ -26,6 +26,7 @@ export class GetAiJobQuery extends Query<
   constructor(
     readonly org: string,
     readonly id: string,
+    readonly actor?: Actor,
   ) {
     super();
   }
@@ -34,7 +35,7 @@ export class GetAiJobQuery extends Query<
 export class GetAiJobHandler implements IQueryHandler<GetAiJobQuery> {
   constructor(@Inject(AiRepository) private readonly repo: AiRepository) {}
   execute(query: GetAiJobQuery) {
-    return this.repo.job(query.org, query.id);
+    return this.repo.job(query.org, query.id, query.actor);
   }
 }
 export class GetAiUsageQuery extends Query<
@@ -88,6 +89,7 @@ export class AcceptLifestyleCommand extends Command<
   constructor(
     readonly org: string,
     readonly resultId: string,
+    readonly actor?: Actor,
   ) {
     super();
   }
@@ -98,7 +100,7 @@ export class AcceptLifestyleHandler implements ICommandHandler<AcceptLifestyleCo
     @Inject(LifestyleRepository) private readonly repo: LifestyleRepository,
   ) {}
   execute(command: AcceptLifestyleCommand) {
-    return this.repo.accept(command.org, command.resultId);
+    return this.repo.accept(command.org, command.resultId, command.actor);
   }
 }
 export const aiHandlers = [

@@ -11,6 +11,7 @@ import {
   Inject,
 } from "@nestjs/common";
 import { z } from "zod";
+import { requireWorkspaceAccess } from "../auth/domain/workspace-access";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { CommandBus, QueryBus } from "@nestjs/cqrs";
 import type { AuthenticatedRequest } from "../auth/domain/actor";
@@ -148,6 +149,7 @@ export class DocumentsController {
     @Req() req: AuthenticatedRequest,
     @QueryParam("includeDisabled") includeDisabled?: string,
   ) {
+    requireWorkspaceAccess(req.actor, "canViewSocialPosts");
     return {
       posts: await this.visibility.forActor(
         req.actor,
@@ -166,6 +168,7 @@ export class DocumentsController {
     @Req() req: AuthenticatedRequest,
     @Param("id") id: string,
   ) {
+    requireWorkspaceAccess(req.actor, "canViewSocialPosts");
     return {
       post: await this.visibility.forActor(
         req.actor,

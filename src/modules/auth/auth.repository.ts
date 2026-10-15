@@ -1,5 +1,6 @@
 import { Injectable, Inject, UnauthorizedException } from "@nestjs/common";
 import { Database } from "../../database/database";
+import { resolvedWorkspaceAccess } from "./domain/workspace-access";
 import type { Actor } from "./domain/actor";
 import { createHmac } from "node:crypto";
 import { env } from "../../config/environment";
@@ -13,6 +14,7 @@ interface UserRow {
   role: Actor["role"];
   review_role: Actor["reviewRole"];
   must_change_password: boolean;
+  workspace_access: unknown;
 }
 @Injectable()
 export class AuthRepository {
@@ -22,7 +24,7 @@ export class AuthRepository {
   }
   async credentials(email: string) {
     const rows = await this.db.query<UserRow & { password_hash: string }>(
-      "SELECT u.id user_id,m.organization_id,u.email,u.name,u.password_hash,u.must_change_password,m.role,m.review_role,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END account_role FROM users u JOIN memberships m ON m.user_id=u.id WHERE u.email=$1 AND m.status='active' AND u.email_verified_at IS NOT NULL ORDER BY m.organization_id LIMIT 1",
+      "SELECT u.id user_id,m.organization_id,u.email,u.name,u.password_hash,u.must_change_password,m.role,m.review_role,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END account_role,m.workspace_access FROM users u JOIN memberships m ON m.user_id=u.id WHERE u.email=$1 AND m.status='active' AND u.email_verified_at IS NOT NULL ORDER BY m.organization_id LIMIT 1",
       [email],
     );
     const row = rows[0];
@@ -33,7 +35,7 @@ export class AuthRepository {
   async session(token: string): Promise<Actor | null> {
     if (!token || token.length > 256) return null;
     const rows = await this.db.query<UserRow>(
-      "SELECT u.id user_id,s.organization_id,u.email,u.name,u.must_change_password,m.role,m.review_role,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END account_role FROM sessions s JOIN users u ON u.id=s.user_id JOIN memberships m ON m.user_id=s.user_id AND m.organization_id=s.organization_id WHERE s.token_hash=$1 AND s.expires_at>now() AND m.status='active' AND u.email_verified_at IS NOT NULL",
+      "SELECT u.id user_id,s.organization_id,u.email,u.name,u.must_change_password,m.role,m.review_role,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END account_role,m.workspace_access FROM sessions s JOIN users u ON u.id=s.user_id JOIN memberships m ON m.user_id=s.user_id AND m.organization_id=s.organization_id WHERE s.token_hash=$1 AND s.expires_at>now() AND m.status='active' AND u.email_verified_at IS NOT NULL",
       [this.tokenHash(token)],
     );
     return rows[0] ? this.actor(rows[0]) : null;
@@ -47,7 +49,7 @@ export class AuthRepository {
       // Serialize against password changes, deactivation and role edits. Never issue a
       // session from credentials that became stale while Argon2 verification ran.
       const result = await client.query<UserRow>(
-        "SELECT u.id user_id,m.organization_id,u.email,u.name,u.must_change_password,m.role,m.review_role,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END account_role FROM users u JOIN memberships m ON m.user_id=u.id WHERE u.id=$1 AND m.organization_id=$2 AND u.password_hash=$3 AND m.status='active' AND u.email_verified_at IS NOT NULL FOR UPDATE OF u,m",
+        "SELECT u.id user_id,m.organization_id,u.email,u.name,u.must_change_password,m.role,m.review_role,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END account_role,m.workspace_access FROM users u JOIN memberships m ON m.user_id=u.id WHERE u.id=$1 AND m.organization_id=$2 AND u.password_hash=$3 AND m.status='active' AND u.email_verified_at IS NOT NULL FOR UPDATE OF u,m",
         [actor.userId, actor.organizationId, expectedPasswordHash],
       );
       const row = result.rows[0];
@@ -92,6 +94,7 @@ export class AuthRepository {
       role: row.account_role === "pm" ? "reviewer" : row.role,
       reviewRole: row.review_role,
       mustChangePassword: row.must_change_password,
+      access: resolvedWorkspaceAccess(row.account_role, row.workspace_access),
     };
   }
 }

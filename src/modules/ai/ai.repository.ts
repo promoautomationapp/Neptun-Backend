@@ -11,6 +11,7 @@ import { Database } from "../../database/database";
 import { env } from "../../config/environment";
 import { DocumentAssets } from "../assets/document-assets";
 import { LifestyleRepository } from "./lifestyle.repository";
+import { requireSocialContextAccess } from "../auth/domain/workspace-access";
 import type { Actor } from "../auth/domain/actor";
 import type { JsonObject, JsonValue } from "../../shared/json";
 import { proofreadFields, assembleProofread } from "./domain/proofread";
@@ -37,6 +38,7 @@ export class AiRepository {
   ) {}
   async enqueue(actor: Actor, request: AiRequest): Promise<AiTicket> {
     const input = normalizeAiParams(request.operation, request.params);
+    requireSocialContextAccess(actor, input.context);
     const params = [
       "proofread",
       "text_generate",
@@ -259,7 +261,7 @@ export class AiRepository {
       };
     });
   }
-  async job(org: string, id: string) {
+  async job(org: string, id: string, actor?: Actor) {
     const row = (
       await this.db.query<AiJobRow>(
         "SELECT * FROM ai_jobs WHERE organization_id=$1 AND id=$2",
@@ -273,6 +275,8 @@ export class AiRepository {
         [org, row.result_id],
       )
     )[0];
+    if (actor && result)
+      requireSocialContextAccess(actor, result.params_json.context);
     return {
       jobId: row.id,
       resultId: row.result_id,

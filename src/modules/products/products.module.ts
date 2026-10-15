@@ -11,6 +11,7 @@ import {
 import { Query, QueryHandler, QueryBus } from "@nestjs/cqrs";
 import type { IQueryHandler } from "@nestjs/cqrs";
 import { z } from "zod";
+import { requireWorkspaceAccess } from "../auth/domain/workspace-access";
 import { CatalogModule } from "../catalog/catalog.module";
 import { ProductsRepository } from "./products.repository";
 import type { ProductFilters, ProductView } from "./products.repository";
@@ -21,6 +22,7 @@ export class SearchProductsQuery extends Query<
   constructor(
     readonly organizationId: string,
     readonly filters: ProductFilters,
+    readonly categoryPaths: string[] | null = null,
   ) {
     super();
   }
@@ -31,13 +33,18 @@ export class SearchProductsHandler implements IQueryHandler<SearchProductsQuery>
     @Inject(ProductsRepository) private readonly repository: ProductsRepository,
   ) {}
   execute(query: SearchProductsQuery) {
-    return this.repository.list(query.organizationId, query.filters);
+    return this.repository.list(
+      query.organizationId,
+      query.filters,
+      query.categoryPaths,
+    );
   }
 }
 export class BatchProductsQuery extends Query<ProductView[]> {
   constructor(
     readonly organizationId: string,
     readonly codes: string[],
+    readonly categoryPaths: string[] | null = null,
   ) {
     super();
   }
@@ -48,13 +55,20 @@ export class BatchProductsHandler implements IQueryHandler<BatchProductsQuery> {
     @Inject(ProductsRepository) private readonly repository: ProductsRepository,
   ) {}
   execute(query: BatchProductsQuery) {
-    return this.repository.batch(query.organizationId, query.codes);
+    return this.repository.batch(
+      query.organizationId,
+      query.codes,
+      query.categoryPaths,
+    );
   }
 }
 export class ProductFacetsQuery extends Query<
   Awaited<ReturnType<ProductsRepository["facets"]>>
 > {
-  constructor(readonly organizationId: string) {
+  constructor(
+    readonly organizationId: string,
+    readonly categoryPaths: string[] | null = null,
+  ) {
     super();
   }
 }
@@ -64,7 +78,7 @@ export class ProductFacetsHandler implements IQueryHandler<ProductFacetsQuery> {
     @Inject(ProductsRepository) private readonly repository: ProductsRepository,
   ) {}
   execute(query: ProductFacetsQuery) {
-    return this.repository.facets(query.organizationId);
+    return this.repository.facets(query.organizationId, query.categoryPaths);
   }
 }
 const filters = z.object({
@@ -91,12 +105,18 @@ export class ProductsController {
       new SearchProductsQuery(
         request.actor.organizationId,
         filters.parse(query),
+        requireWorkspaceAccess(request.actor, "canViewCatalog")
+          .catalogCategoryPaths,
       ),
     );
   }
   @Get("facets") facets(@Req() request: AuthenticatedRequest) {
     return this.queries.execute(
-      new ProductFacetsQuery(request.actor.organizationId),
+      new ProductFacetsQuery(
+        request.actor.organizationId,
+        requireWorkspaceAccess(request.actor, "canViewCatalog")
+          .catalogCategoryPaths,
+      ),
     );
   }
   @Post("batch") async batch(
@@ -108,7 +128,12 @@ export class ProductsController {
       .parse(body);
     return {
       products: await this.queries.execute(
-        new BatchProductsQuery(request.actor.organizationId, input.codes),
+        new BatchProductsQuery(
+          request.actor.organizationId,
+          input.codes,
+          requireWorkspaceAccess(request.actor, "canViewCatalog")
+            .catalogCategoryPaths,
+        ),
       ),
     };
   }

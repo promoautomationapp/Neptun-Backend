@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { categoryScopeSql } from "../auth/domain/workspace-access";
 import { Database } from "../../database/database";
 import type { StoragePort } from "../storage/storage.port";
 import { downloadPublic } from "../../shared/public-download";
@@ -7,7 +8,16 @@ import { siteUrl, type SourceBrand } from "./neptun-source";
 @Injectable()
 export class CatalogBrandsRepository {
   constructor(@Inject(Database) readonly db: Database) {}
-  async list(organizationId: string) {
+  async list(organizationId: string, categoryPaths: string[] | null = null) {
+    const values: unknown[] = [organizationId];
+    const scope = categoryScopeSql(
+      "p.category_path",
+      categoryPaths,
+      (value) => {
+        values.push(value);
+        return `$${values.length}`;
+      },
+    );
     const brands = await this.db.query<{
       source_id: number;
       name: string;
@@ -15,8 +25,8 @@ export class CatalogBrandsRepository {
       asset_id: string | null;
       error: string | null;
     }>(
-      "SELECT source_id,name,source_url,asset_id,error FROM catalog_source_brands WHERE organization_id=$1 ORDER BY name",
-      [organizationId],
+      `SELECT b.source_id,b.name,b.source_url,b.asset_id,b.error FROM catalog_source_brands b WHERE b.organization_id=$1${scope ? ` AND EXISTS(SELECT 1 FROM products p WHERE p.organization_id=b.organization_id AND p.deleted_at IS NULL AND lower(p.brand)=lower(b.name) AND ${scope})` : ""} ORDER BY b.name`,
+      values,
     );
     return {
       brands: brands.map((brand) => ({

@@ -58,7 +58,11 @@ export class AiController {
     @Param("id") id: string,
   ) {
     return this.queries.execute(
-      new GetAiJobQuery(req.actor.organizationId, z.uuid().parse(id)),
+      new GetAiJobQuery(
+        req.actor.organizationId,
+        z.uuid().parse(id),
+        req.actor,
+      ),
     );
   }
   @Get("ai/usage") usage(
@@ -92,7 +96,11 @@ export class AiController {
     @Param("id") id: string,
   ) {
     return this.commands.execute(
-      new AcceptLifestyleCommand(req.actor.organizationId, z.uuid().parse(id)),
+      new AcceptLifestyleCommand(
+        req.actor.organizationId,
+        z.uuid().parse(id),
+        req.actor,
+      ),
     );
   }
   @Post("ai-remove-background") cutout(

@@ -13,6 +13,7 @@ import type { Request } from "express";
 import { z } from "zod";
 import { Public } from "../auth/auth.guard";
 import type { AuthenticatedRequest } from "../auth/domain/actor";
+import { workspaceAccessSchema } from "../auth/domain/workspace-access";
 import { IdentityService } from "./identity.service";
 const email = z.string().trim().toLowerCase().pipe(z.email());
 const name = z.string().trim().min(1).max(120);
@@ -35,7 +36,15 @@ export class UsersController {
   ) {
     return this.identity.invite(
       req.actor,
-      z.object({ email, name, role }).strict().parse(body),
+      z
+        .object({
+          email,
+          name,
+          role,
+          access: workspaceAccessSchema.nullable().optional(),
+        })
+        .strict()
+        .parse(body),
     );
   }
   @Patch("users/:id") update(
@@ -51,6 +60,7 @@ export class UsersController {
           name: name.optional(),
           role: role.optional(),
           status: z.enum(["active", "disabled"]).optional(),
+          access: workspaceAccessSchema.nullable().optional(),
         })
         .strict()
         .refine((x) => Object.keys(x).length > 0, "Provide a change.")

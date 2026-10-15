@@ -2,6 +2,10 @@ import { Inject, Injectable } from "@nestjs/common";
 import { Database } from "../../database/database";
 import type { JsonObject } from "../../shared/json";
 import { normalizeSearch, searchWords, isPhoneQuery } from "./domain/search";
+import {
+  categoryPathAllowed,
+  categoryScopeSql,
+} from "../auth/domain/workspace-access";
 import { assetUrl } from "../assets/asset-ingest";
 
 export interface ProductView {
@@ -82,13 +86,19 @@ const variants = `LEFT JOIN LATERAL (SELECT source_id,source_url,asset_id FROM c
 @Injectable()
 export class ProductsRepository {
   constructor(@Inject(Database) private readonly db: Database) {}
-  async list(organizationId: string, filters: ProductFilters) {
+  async list(
+    organizationId: string,
+    filters: ProductFilters,
+    categoryPaths: string[] | null = null,
+  ) {
     const values: unknown[] = [organizationId];
     const where = ["p.organization_id=$1", "p.deleted_at IS NULL"];
     const bind = (value: unknown) => {
       values.push(value);
       return `$${values.length}`;
     };
+    const scope = categoryScopeSql("p.category_path", categoryPaths, bind);
+    if (scope) where.push(scope);
     for (const field of ["category", "subcategory", "brand"] as const)
       if (filters[field]) where.push(`p.${field}=${bind(filters[field])}`);
     if (filters.categoryPath) {
@@ -156,11 +166,24 @@ export class ProductsRepository {
           : null,
     };
   }
-  async batch(organizationId: string, codes: string[]): Promise<ProductView[]> {
+  async batch(
+    organizationId: string,
+    codes: string[],
+    categoryPaths: string[] | null = null,
+  ): Promise<ProductView[]> {
     if (!codes.length) return [];
+    const values: unknown[] = [organizationId, codes];
+    const scope = categoryScopeSql(
+      "p.category_path",
+      categoryPaths,
+      (value) => {
+        values.push(value);
+        return `$${values.length}`;
+      },
+    );
     const rows = await this.db.query<ProductRow>(
-      `SELECT ${projection} FROM products p ${variants} WHERE p.organization_id=$1 AND p.code=ANY($2::text[]) AND p.deleted_at IS NULL`,
-      [organizationId, codes],
+      `SELECT ${projection} FROM products p ${variants} WHERE p.organization_id=$1 AND p.code=ANY($2::text[]) AND p.deleted_at IS NULL${scope ? ` AND ${scope}` : ""}`,
+      values,
     );
     const images = await this.db.query<{
       product_id: string;
@@ -174,7 +197,16 @@ export class ProductsRepository {
       this.view({ ...row, image_ids: byProduct.get(row.id) ?? [] }),
     );
   }
-  async facets(organizationId: string) {
+  async facets(organizationId: string, categoryPaths: string[] | null = null) {
+    const values: unknown[] = [organizationId];
+    const scope = categoryScopeSql(
+      "p.category_path",
+      categoryPaths,
+      (value) => {
+        values.push(value);
+        return `$${values.length}`;
+      },
+    );
     const [rows, sourceRows] = await Promise.all([
       this.db.query<{
         category: string;
@@ -182,8 +214,8 @@ export class ProductsRepository {
         brand: string;
         categoryPath: string;
       }>(
-        `SELECT DISTINCT category,subcategory,brand,category_path "categoryPath" FROM products WHERE organization_id=$1 AND deleted_at IS NULL`,
-        [organizationId],
+        `SELECT DISTINCT p.category,p.subcategory,p.brand,p.category_path "categoryPath" FROM products p WHERE p.organization_id=$1 AND p.deleted_at IS NULL${scope ? ` AND ${scope}` : ""}`,
+        values,
       ),
       this.db.query<{
         id: number;
@@ -203,11 +235,15 @@ export class ProductsRepository {
       paths: rows,
       // The website menu also contains empty branches. Do not derive its tree
       // only from products or legacy product-category labels.
-      sourceCategories: sourceRows.map((row) => ({
-        ...row,
-        path: row.categoryPath.split(" > ").filter(Boolean),
-        lastSeenAt: row.lastSeenAt.toISOString(),
-      })),
+      sourceCategories: sourceRows
+        .filter((row) =>
+          categoryPathAllowed(row.categoryPath, categoryPaths, true),
+        )
+        .map((row) => ({
+          ...row,
+          path: row.categoryPath.split(" > ").filter(Boolean),
+          lastSeenAt: row.lastSeenAt.toISOString(),
+        })),
     };
   }
   private view(row: ProductRow): ProductView {
