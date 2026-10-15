@@ -219,7 +219,9 @@ export const workspaceSettingsSchema = z
         z
           .object({
             id: z.string().min(1).max(100),
-            target: z.enum(["cover", "pages", "both"]).default("both"),
+            target: z
+              .enum(["cover", "pages", "stores", "footer", "both"])
+              .default("both"),
             background: z.enum(["light", "dark", "color"]).default("dark"),
             color: color.default(""),
             image: source.refine(
@@ -287,6 +289,7 @@ export const workspaceSettingsSchema = z
           id: z.string().min(1).max(100),
           name: z.string().trim().min(1).max(120),
           tagline: text.default(""),
+          logo: source.optional(),
           visible: z.boolean().default(true),
         }),
       )

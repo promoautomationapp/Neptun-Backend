@@ -17,7 +17,7 @@ import {
   PRICING_URL,
   PRICING_VERSION,
 } from "../ai/domain/pricing";
-import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { MediaInventoryCache } from "./media-inventory";
 
 export const usageFilters = z
   .object({
@@ -56,13 +56,7 @@ function requireSuperadmin(req: AuthenticatedRequest) {
   return req.actor.organizationId;
 }
 export class InsightsRepository {
-  private storageCache = new Map<
-    string,
-    {
-      expires: number;
-      result: { objects: number; bytes: number; checkedAt: string };
-    }
-  >();
+  private readonly inventory = new MediaInventoryCache();
   constructor(@Inject(Database) private readonly db: Database) {}
   async ai(org: string, filters: Filters) {
     const rows = await this.db.query<UsageRow>(
@@ -243,57 +237,19 @@ export class InsightsRepository {
       (SELECT count(*) FROM asset_variants WHERE organization_id=$1)::text variants`,
       [org],
     );
-    let bucket: { objects: number; bytes: number; checkedAt: string } | null =
-      null;
-    let bucketError = false;
-    if (env.STORAGE_DRIVER === "r2") {
-      const cached = this.storageCache.get(org);
-      if (cached && cached.expires > Date.now()) bucket = cached.result;
-      else {
-        const client = new S3Client({
-          region: "auto",
-          endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-          credentials: {
-            accessKeyId: env.R2_ACCESS_KEY_ID,
-            secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-          },
-          requestHandler: { requestTimeout: 15000 },
-        });
-        try {
-          let token: string | undefined;
-          let objects = 0,
-            bytes = 0;
-          do {
-            const page = await client.send(
-              new ListObjectsV2Command({
-                Bucket: env.R2_BUCKET,
-                Prefix: `org/${org}/`,
-                ContinuationToken: token,
-              }),
-            );
-            for (const item of page.Contents ?? []) {
-              objects++;
-              bytes += item.Size ?? 0;
-            }
-            token = page.IsTruncated ? page.NextContinuationToken : undefined;
-          } while (token);
-          bucket = { objects, bytes, checkedAt: new Date().toISOString() };
-          this.storageCache.set(org, {
-            expires: Date.now() + 60000,
-            result: bucket,
-          });
-        } catch {
-          bucketError = true;
-        } finally {
-          client.destroy();
-        }
-      }
-    }
+    const inventory =
+      env.STORAGE_DRIVER === "r2"
+        ? this.inventory.status(org)
+        : {
+            bucket: null,
+            bucketError: false,
+            bucketPending: false,
+            bucketStale: false,
+          };
     return {
       driver: env.STORAGE_DRIVER,
       bucketName: env.STORAGE_DRIVER === "r2" ? env.R2_BUCKET : null,
-      bucket,
-      bucketError,
+      ...inventory,
       registered: {
         objects: kinds.reduce((n, x) => n + Number(x.count), 0),
         bytes: kinds.reduce((n, x) => n + Number(x.bytes), 0),
