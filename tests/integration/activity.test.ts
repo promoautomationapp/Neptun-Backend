@@ -190,6 +190,27 @@ describe("administrator activity ledger", () => {
     expect(JSON.stringify(regular.body)).not.toContain(ids.support);
     expect(JSON.stringify(regular.body)).not.toContain(`other-${suffix}`);
     expect(JSON.stringify(support.body)).toContain(emails.support);
+    const global = await agents
+      .support!.get("/api/activity")
+      .query({ search: emails.other })
+      .expect(200);
+    expect(global.body.scope).toBe("all-organizations");
+    expect(
+      global.body.records.some(
+        (row: { targetId: string }) => row.targetId === `other-${suffix}`,
+      ),
+    ).toBe(true);
+    expect(
+      global.body.records.every(
+        (row: { organization: { id: string } }) => row.organization.id !== org,
+      ),
+    ).toBe(true);
+    const isolated = await agents
+      .admin!.get("/api/activity")
+      .query({ search: emails.other })
+      .expect(200);
+    expect(isolated.body.records).toEqual([]);
+    expect(JSON.stringify(isolated.body.users)).not.toContain(emails.other);
     expect(JSON.stringify(support.body)).not.toContain("never-return-detail");
     for (const role of ["staff", "pm"]) {
       if (role === "staff")

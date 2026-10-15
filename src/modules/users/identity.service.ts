@@ -253,6 +253,7 @@ export class IdentityService {
       const nextRole = input.role ?? target.account_role;
       const nextStatus = input.status ?? target.status;
       if (
+        actor.accountRole !== "superadmin" &&
         target.account_role === "admin" &&
         target.status === "active" &&
         (nextRole !== "admin" || nextStatus !== "active")

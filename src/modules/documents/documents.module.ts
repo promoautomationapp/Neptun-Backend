@@ -30,6 +30,7 @@ import {
   GetDocumentQuery,
   SaveDocumentCommand,
   RemoveDocumentCommand,
+  RestoreDocumentCommand,
   ReviewCampaignCommand,
   documentHandlers,
 } from "./application/handlers";
@@ -40,12 +41,20 @@ export class DocumentsController {
     @Inject(CommandBus) private readonly commands: CommandBus,
     @Inject(DocumentVisibility) private readonly visibility: DocumentVisibility,
   ) {}
-  @Get("campaigns") async campaigns(@Req() req: AuthenticatedRequest) {
+  @Get("campaigns") async campaigns(
+    @Req() req: AuthenticatedRequest,
+    @QueryParam("includeDisabled") includeDisabled?: string,
+  ) {
     return {
       campaigns: await this.visibility.forActor(
         req.actor,
         await this.queries.execute(
-          new ListDocumentsQuery(req.actor.organizationId, "campaign"),
+          new ListDocumentsQuery(
+            req.actor.organizationId,
+            "campaign",
+            req.actor.accountRole === "superadmin" &&
+              includeDisabled === "true",
+          ),
         ),
       ),
     };
@@ -62,6 +71,7 @@ export class DocumentsController {
             req.actor.organizationId,
             "campaign",
             identifier.parse(id),
+            req.actor.accountRole === "superadmin",
           ),
         ),
       ),
@@ -88,12 +98,32 @@ export class DocumentsController {
   ) {
     return this.commands.execute(
       new RemoveDocumentCommand(
-        req.actor.organizationId,
+        req.actor,
         "campaign",
         identifier.parse(id),
         version ? z.coerce.number().int().positive().parse(version) : undefined,
       ),
     );
+  }
+  @Post("campaigns/:id/restore") async restoreCampaign(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const { version } = z
+      .object({ version: z.number().int().positive().optional() })
+      .strict()
+      .parse(body ?? {});
+    return {
+      campaign: await this.commands.execute(
+        new RestoreDocumentCommand(
+          req.actor,
+          "campaign",
+          identifier.parse(id),
+          version,
+        ),
+      ),
+    };
   }
   @Post("campaigns/:id/review") async review(
     @Req() req: AuthenticatedRequest,
@@ -113,12 +143,20 @@ export class DocumentsController {
       ),
     };
   }
-  @Get("posts") async posts(@Req() req: AuthenticatedRequest) {
+  @Get("posts") async posts(
+    @Req() req: AuthenticatedRequest,
+    @QueryParam("includeDisabled") includeDisabled?: string,
+  ) {
     return {
       posts: await this.visibility.forActor(
         req.actor,
         await this.queries.execute(
-          new ListDocumentsQuery(req.actor.organizationId, "post"),
+          new ListDocumentsQuery(
+            req.actor.organizationId,
+            "post",
+            req.actor.accountRole === "superadmin" &&
+              includeDisabled === "true",
+          ),
         ),
       ),
     };
@@ -135,6 +173,7 @@ export class DocumentsController {
             req.actor.organizationId,
             "post",
             identifier.parse(id),
+            req.actor.accountRole === "superadmin",
           ),
         ),
       ),
@@ -161,12 +200,32 @@ export class DocumentsController {
   ) {
     return this.commands.execute(
       new RemoveDocumentCommand(
-        req.actor.organizationId,
+        req.actor,
         "post",
         identifier.parse(id),
         version ? z.coerce.number().int().positive().parse(version) : undefined,
       ),
     );
+  }
+  @Post("posts/:id/restore") async restorePost(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const { version } = z
+      .object({ version: z.number().int().positive().optional() })
+      .strict()
+      .parse(body ?? {});
+    return {
+      post: await this.commands.execute(
+        new RestoreDocumentCommand(
+          req.actor,
+          "post",
+          identifier.parse(id),
+          version,
+        ),
+      ),
+    };
   }
 }
 @Module({

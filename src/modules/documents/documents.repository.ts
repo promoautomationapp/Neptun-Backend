@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
 } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { Database } from "../../database/database";
@@ -33,9 +34,10 @@ export class DocumentsRepository {
   async list(
     organizationId: string,
     kind: DocumentKind,
+    includeDisabled = false,
   ): Promise<(Campaign | Post)[]> {
     const rows = await this.db.query<DocumentRow>(
-      `SELECT id,layout,version,updated_at${kind === "campaign" ? ",status" : ""} FROM ${tables[kind]} WHERE organization_id=$1 AND deleted_at IS NULL ORDER BY updated_at DESC`,
+      `SELECT id,layout,version,updated_at,deleted_at${kind === "campaign" ? ",status" : ""} FROM ${tables[kind]} WHERE organization_id=$1 ${includeDisabled ? "" : "AND deleted_at IS NULL"} ORDER BY updated_at DESC`,
       [organizationId],
     );
     return rows.map((row) => documentSnapshot(row, kind));
@@ -44,10 +46,11 @@ export class DocumentsRepository {
     organizationId: string,
     kind: DocumentKind,
     id: string,
+    includeDisabled = false,
   ): Promise<Campaign | Post> {
     const row = (
       await this.db.query<DocumentRow>(
-        `SELECT id,layout,version,updated_at${kind === "campaign" ? ",status" : ""} FROM ${tables[kind]} WHERE organization_id=$1 AND id=$2 AND deleted_at IS NULL`,
+        `SELECT id,layout,version,updated_at,deleted_at${kind === "campaign" ? ",status" : ""} FROM ${tables[kind]} WHERE organization_id=$1 AND id=$2 ${includeDisabled ? "" : "AND deleted_at IS NULL"}`,
         [organizationId, id],
       )
     )[0];
@@ -81,6 +84,7 @@ export class DocumentsRepository {
           [actor.organizationId, input.id],
         )
       ).rows[0];
+      if (existing?.deleted_at) this.disabled(actor);
       if (importing && existing) return documentSnapshot(existing, kind);
       if (existing && input.version !== existing.version)
         throw new ConflictException({
@@ -112,6 +116,9 @@ export class DocumentsRepository {
           ? parsed.updatedAt
           : new Date().toISOString();
       document.updatedBy = actor.email;
+      // Disable/restore are dedicated server actions. Autosave cannot forge their metadata.
+      document.disabledAt = null;
+      document.disabledBy = null;
       const version = (existing?.version ?? 0) + 1;
       document.version = version;
       if (kind === "campaign")
@@ -163,23 +170,132 @@ export class DocumentsRepository {
     });
   }
   async remove(
-    organizationId: string,
+    actor: Actor,
     kind: DocumentKind,
     id: string,
     version?: number,
   ): Promise<{ deleted: boolean }> {
-    const rows = await this.db.query(
-      `UPDATE ${tables[kind]} SET deleted_at=now() WHERE organization_id=$1 AND id=$2 AND deleted_at IS NULL ${version === undefined ? "" : "AND version=$3"} RETURNING id`,
-      version === undefined
-        ? [organizationId, id]
-        : [organizationId, id, version],
-    );
-    if (!rows.length && version !== undefined)
+    return this.db.transaction(async (client) => {
+      await this.lock(client, actor.organizationId, kind, id);
+      const row = (
+        await client.query<DocumentRow>(
+          `SELECT id,layout,version,updated_at,deleted_at${kind === "campaign" ? ",status" : ""} FROM ${tables[kind]} WHERE organization_id=$1 AND id=$2 FOR UPDATE`,
+          [actor.organizationId, id],
+        )
+      ).rows[0];
+      if (!row || row.deleted_at) {
+        if (version !== undefined)
+          throw new NotFoundException("Document not found.");
+        return { deleted: false };
+      }
+      this.checkVersion(row, version);
+      const at = new Date().toISOString();
+      const document = {
+        ...documentSnapshot(row, kind),
+        disabledAt: at,
+        disabledBy: actor.email,
+        updatedAt: at,
+        updatedBy: actor.email,
+        version: row.version + 1,
+      };
+      await client.query(
+        `UPDATE ${tables[kind]} SET deleted_at=$3,layout=$4,version=$5,updated_at=$3 WHERE organization_id=$1 AND id=$2`,
+        [actor.organizationId, id, at, document, document.version],
+      );
+      await this.version(
+        client,
+        actor.organizationId,
+        kind,
+        id,
+        document.version,
+        document,
+      );
+      return { deleted: true };
+    });
+  }
+  async restore(
+    actor: Actor,
+    kind: DocumentKind,
+    id: string,
+    version?: number,
+  ): Promise<Campaign | Post> {
+    if (actor.accountRole !== "superadmin")
+      throw new ForbiddenException(
+        "Only support administrators can enable disabled documents.",
+      );
+    return this.db.transaction(async (client) => {
+      await this.lock(client, actor.organizationId, kind, id);
+      const row = (
+        await client.query<DocumentRow>(
+          `SELECT id,layout,version,updated_at,deleted_at${kind === "campaign" ? ",status" : ""} FROM ${tables[kind]} WHERE organization_id=$1 AND id=$2 FOR UPDATE`,
+          [actor.organizationId, id],
+        )
+      ).rows[0];
+      if (!row) throw new NotFoundException("Document not found.");
+      this.checkVersion(row, version);
+      if (!row.deleted_at) return documentSnapshot(row, kind);
+      const document = {
+        ...documentSnapshot(row, kind),
+        disabledAt: null,
+        disabledBy: null,
+        version: row.version + 1,
+        updatedAt: new Date().toISOString(),
+        updatedBy: actor.email,
+      };
+      await client.query(
+        `UPDATE ${tables[kind]} SET deleted_at=NULL,layout=$3,version=$4,updated_at=$5 WHERE organization_id=$1 AND id=$2`,
+        [
+          actor.organizationId,
+          id,
+          document,
+          document.version,
+          document.updatedAt,
+        ],
+      );
+      await this.version(
+        client,
+        actor.organizationId,
+        kind,
+        id,
+        document.version,
+        document,
+      );
+      if (kind === "campaign")
+        await this.projections(
+          client,
+          actor.organizationId,
+          campaignSchema.parse(document),
+        );
+      return kind === "campaign"
+        ? campaignSchema.parse(document)
+        : postSchema.parse(document);
+    });
+  }
+  private async lock(
+    client: PoolClient,
+    organizationId: string,
+    kind: DocumentKind,
+    id: string,
+  ) {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      `${organizationId}:${kind}:${id}`,
+    ]);
+  }
+  private checkVersion(row: DocumentRow, version?: number) {
+    if (version !== undefined && version !== row.version)
       throw new ConflictException({
         error: "The document has changed.",
         code: "VERSION_CONFLICT",
+        currentVersion: row.version,
       });
-    return { deleted: rows.length > 0 };
+  }
+  private disabled(actor: Actor): never {
+    if (actor.accountRole !== "superadmin")
+      throw new NotFoundException("Document not found.");
+    throw new ConflictException({
+      error: "Enable this document before editing it.",
+      code: "DOCUMENT_DISABLED",
+    });
   }
   async review(
     actor: Actor,

@@ -64,6 +64,8 @@ export const campaignSchema = z
       .regex(/^#[0-9a-f]{6}$/i)
       .default("#ffffff"),
     version: z.number().int().positive().optional(),
+    disabledAt: z.iso.datetime().nullable().optional(),
+    disabledBy: z.string().max(320).nullable().optional(),
     status: z.enum(statuses).optional(),
     reviewComments: z.array(commentSchema).default([]),
     reviewHistory: z.array(historySchema).default([]),
@@ -75,6 +77,8 @@ export const postSchema = z
     name: z.string().max(300).default("Social post"),
     products: z.array(jsonObject).max(12),
     version: z.number().int().positive().optional(),
+    disabledAt: z.iso.datetime().nullable().optional(),
+    disabledBy: z.string().max(320).nullable().optional(),
   })
   .catchall(jsonValue);
 export type Campaign = z.infer<typeof campaignSchema>;
@@ -86,6 +90,7 @@ export interface DocumentRow {
   version: number;
   status?: Campaign["status"];
   updated_at: Date;
+  deleted_at?: Date | null;
 }
 export function documentSnapshot(
   row: DocumentRow,
@@ -100,6 +105,11 @@ export function documentSnapshot(
       : {}),
     version: row.version,
     updatedAt: row.updated_at.toISOString(),
+    disabledAt: row.deleted_at?.toISOString() ?? null,
+    disabledBy:
+      row.deleted_at && typeof row.layout.disabledBy === "string"
+        ? row.layout.disabledBy
+        : null,
     ...(row.status ? { status: row.status } : {}),
   };
 }

@@ -9,6 +9,7 @@ export class ListDocumentsQuery extends Query<(Campaign | Post)[]> {
   constructor(
     readonly organizationId: string,
     readonly kind: DocumentKind,
+    readonly includeDisabled = false,
   ) {
     super();
   }
@@ -18,6 +19,7 @@ export class GetDocumentQuery extends Query<Campaign | Post> {
     readonly organizationId: string,
     readonly kind: DocumentKind,
     readonly id: string,
+    readonly includeDisabled = false,
   ) {
     super();
   }
@@ -33,7 +35,17 @@ export class SaveDocumentCommand extends Command<Campaign | Post> {
 }
 export class RemoveDocumentCommand extends Command<{ deleted: boolean }> {
   constructor(
-    readonly organizationId: string,
+    readonly actor: Actor,
+    readonly kind: DocumentKind,
+    readonly id: string,
+    readonly version?: number,
+  ) {
+    super();
+  }
+}
+export class RestoreDocumentCommand extends Command<Campaign | Post> {
+  constructor(
+    readonly actor: Actor,
     readonly kind: DocumentKind,
     readonly id: string,
     readonly version?: number,
@@ -57,7 +69,11 @@ export class ListDocumentsHandler implements IQueryHandler<ListDocumentsQuery> {
     private readonly repository: DocumentsRepository,
   ) {}
   execute(query: ListDocumentsQuery) {
-    return this.repository.list(query.organizationId, query.kind);
+    return this.repository.list(
+      query.organizationId,
+      query.kind,
+      query.includeDisabled,
+    );
   }
 }
 @QueryHandler(GetDocumentQuery)
@@ -67,7 +83,12 @@ export class GetDocumentHandler implements IQueryHandler<GetDocumentQuery> {
     private readonly repository: DocumentsRepository,
   ) {}
   execute(query: GetDocumentQuery) {
-    return this.repository.get(query.organizationId, query.kind, query.id);
+    return this.repository.get(
+      query.organizationId,
+      query.kind,
+      query.id,
+      query.includeDisabled,
+    );
   }
 }
 @CommandHandler(SaveDocumentCommand)
@@ -88,7 +109,22 @@ export class RemoveDocumentHandler implements ICommandHandler<RemoveDocumentComm
   ) {}
   execute(command: RemoveDocumentCommand) {
     return this.repository.remove(
-      command.organizationId,
+      command.actor,
+      command.kind,
+      command.id,
+      command.version,
+    );
+  }
+}
+@CommandHandler(RestoreDocumentCommand)
+export class RestoreDocumentHandler implements ICommandHandler<RestoreDocumentCommand> {
+  constructor(
+    @Inject(DocumentsRepository)
+    private readonly repository: DocumentsRepository,
+  ) {}
+  execute(command: RestoreDocumentCommand) {
+    return this.repository.restore(
+      command.actor,
       command.kind,
       command.id,
       command.version,
@@ -110,5 +146,6 @@ export const documentHandlers = [
   GetDocumentHandler,
   SaveDocumentHandler,
   RemoveDocumentHandler,
+  RestoreDocumentHandler,
   ReviewCampaignHandler,
 ];

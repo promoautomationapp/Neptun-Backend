@@ -112,8 +112,12 @@ export function activityEntry(request: Request): Entry | null {
       "campaign",
     );
   if (route === "/api/team/campaigns/:id")
-    return entry("campaign.delete", "campaign");
-  if (route === "/api/team/posts/:id") return entry("post.delete", "post");
+    return entry("campaign.disable", "campaign");
+  if (route === "/api/team/posts/:id") return entry("post.disable", "post");
+  if (route === "/api/team/campaigns/:id/restore")
+    return entry("campaign.restore", "campaign");
+  if (route === "/api/team/posts/:id/restore")
+    return entry("post.restore", "post");
   if (route === "/api/team/settings") return entry("settings.save", "settings");
   if (route === "/api/catalog/refresh")
     return entry("catalog.refresh", "catalog");
@@ -204,16 +208,16 @@ export class ActivityRepository {
     const history = `WITH history AS (
       SELECT a.id,a.organization_id,a.actor_id,a.actor_role,a.action,a.target_type,a.target_id,a.method,a.route,
         host(a.source_ip) source_ip,a.status_code,a.duration_ms,a.request_id,a.created_at,'activity' source
-      FROM activity_audit a WHERE a.organization_id=$1
+      FROM activity_audit a WHERE ($2 OR a.organization_id=$1)
       UNION ALL
       SELECT a.id,a.organization_id,coalesce(a.actor_id,a.user_id),coalesce(m.account_role,'staff'),a.action,'user',a.user_id::text,
         NULL,NULL,NULL,NULL,NULL,NULL,a.created_at,'account-history'
       FROM account_audit a LEFT JOIN memberships m ON m.organization_id=a.organization_id AND m.user_id=coalesce(a.actor_id,a.user_id)
-      WHERE a.organization_id=$1
+      WHERE ($2 OR a.organization_id=$1)
     ), visible AS (
-      SELECT h.*,u.name actor_name,u.email actor_email FROM history h LEFT JOIN users u ON u.id=h.actor_id
-      WHERE ($2 OR (h.actor_role<>'superadmin' AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.organization_id=$1 AND m.user_id=h.actor_id AND m.account_role='superadmin')
-        AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.organization_id=$1 AND m.user_id::text=h.target_id AND m.account_role='superadmin')))
+      SELECT h.*,u.name actor_name,u.email actor_email,o.name organization_name FROM history h LEFT JOIN users u ON u.id=h.actor_id JOIN organizations o ON o.id=h.organization_id
+      WHERE ($2 OR (h.actor_role IN ('admin','staff','pm') AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.organization_id=h.organization_id AND m.user_id=h.actor_id AND m.account_role='superadmin')
+        AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.organization_id=h.organization_id AND m.user_id::text=h.target_id AND m.account_role='superadmin')))
     )`;
     const conditions = `WHERE ($3::date IS NULL OR created_at>=($3::date::timestamp AT TIME ZONE 'Europe/Belgrade'))
       AND ($4::date IS NULL OR created_at<(($4::date+1)::timestamp AT TIME ZONE 'Europe/Belgrade'))
@@ -236,6 +240,8 @@ export class ActivityRepository {
     );
     const rows = await this.db.query<{
       id: string;
+      organization_id: string;
+      organization_name: string;
       actor_id: string | null;
       actor_name: string | null;
       actor_email: string | null;
@@ -269,6 +275,7 @@ export class ActivityRepository {
     );
     return {
       timeZone: "Europe/Belgrade",
+      scope: includeSupport ? "all-organizations" : "organization",
       total: Number(count?.total ?? 0),
       page: filters.page,
       limit: filters.limit,
@@ -276,6 +283,7 @@ export class ActivityRepository {
       actions: actions.map((row) => row.action),
       records: rows.map((row) => ({
         id: row.id,
+        organization: { id: row.organization_id, name: row.organization_name },
         actor: {
           id: row.actor_id,
           name: row.actor_name ?? "",
