@@ -262,13 +262,27 @@ export function productModel(
   fallbackPath: string[],
   fingerprint = "",
 ): SourceProduct {
-  const rawPath = Array.isArray(model.NavigationPath)
-    ? model.NavigationPath.map((x: SiteObject) =>
-        String(x.NameAl || x.NameEn || x.Name || ""),
-      )
-    : fallbackPath;
-  const path = normalizeHierarchy(rawPath);
+  const navigation = normalizeHierarchy(
+    Array.isArray(model.NavigationPath)
+      ? model.NavigationPath.map((x: SiteObject) =>
+          String(x.NameAl || x.NameEn || x.Name || ""),
+        )
+      : [],
+  );
+  const fallback = normalizeHierarchy(fallbackPath);
   const leaf = text(model.Category?.NameAl || model.Category?.Name || "");
+  // Some detail pages omit intermediate menu levels. Retain the known menu
+  // branch only when the detail breadcrumb is its ordered subsequence.
+  let at = 0;
+  for (const part of fallback)
+    if (norm(part) === norm(navigation[at] || "")) at++;
+  const compatible =
+    at === navigation.length &&
+    (!leaf || norm(fallback.at(-1) || "") === norm(leaf));
+  const path =
+    !navigation.length || (fallback.length > navigation.length && compatible)
+      ? [...fallback]
+      : [...navigation];
   if (leaf && norm(path.at(-1) ?? "") !== norm(leaf)) path.push(leaf);
   const code = text(model.CodeNumber);
   const name = text(model.Title);

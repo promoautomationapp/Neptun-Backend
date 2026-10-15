@@ -33,10 +33,10 @@ export class MediaInventoryCache {
       entry.error = false;
       const current = entry;
       // The explicit deadline also handles transports that ignore cancellation.
-      void withStorageDeadline(() => this.scan(org), 10_000)
+      void withStorageDeadline(() => this.scan(org), 45_000)
         .then((result) => {
           current.result = result;
-          current.expires = Date.now() + 60_000;
+          current.expires = Date.now() + 300_000;
         })
         .catch(() => {
           current.error = true;
@@ -95,7 +95,7 @@ async function scanR2Inventory(org: string): Promise<BucketInventory> {
         if (token) tokens.add(token);
       } while (token);
       return { objects, bytes, checkedAt: new Date().toISOString() };
-    }, 9000);
+    }, 40_000);
   } finally {
     client.destroy();
   }

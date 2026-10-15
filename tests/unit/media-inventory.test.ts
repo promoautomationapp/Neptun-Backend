@@ -47,7 +47,7 @@ describe("nonblocking media inventory", () => {
     const scan = jest.fn(() => new Promise<never>(() => {}));
     const cache = new MediaInventoryCache(scan);
     cache.status("a");
-    await jest.advanceTimersByTimeAsync(10_001);
+    await jest.advanceTimersByTimeAsync(45_001);
     expect(cache.status("a")).toEqual({
       bucket: null,
       bucketPending: false,
@@ -59,7 +59,7 @@ describe("nonblocking media inventory", () => {
     await jest.advanceTimersByTimeAsync(30_001);
     expect(cache.status("a").bucketPending).toBe(true);
     expect(scan).toHaveBeenCalledTimes(2);
-    await jest.advanceTimersByTimeAsync(10_001);
+    await jest.advanceTimersByTimeAsync(45_001);
   });
   test("retains a successful checked inventory when the next refresh fails", async () => {
     jest.useFakeTimers();
@@ -75,7 +75,7 @@ describe("nonblocking media inventory", () => {
     const cache = new MediaInventoryCache(scan);
     cache.status("a");
     await flush();
-    await jest.advanceTimersByTimeAsync(60_001);
+    await jest.advanceTimersByTimeAsync(300_001);
     expect(cache.status("a")).toMatchObject({
       bucket: checked,
       bucketPending: true,

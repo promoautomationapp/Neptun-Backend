@@ -131,3 +131,37 @@ describe("Neptun authoritative catalog parsing", () => {
     expect(healthyFullCrawl(0, 0, 0)).toBe(false);
   });
 });
+
+describe("complete product category membership", () => {
+  const item = {
+    CodeNumber: "123",
+    Title: "Adapter",
+    Category: { Name: "USB-C", Url: "usb-c" },
+    Url: "adapter",
+    Images: [],
+  };
+  test("keeps authoritative intermediate menu branches when detail breadcrumbs skip them", () => {
+    expect(
+      productModel(
+        { ...item, NavigationPath: [{ Name: "IT" }, { Name: "USB-C" }] },
+        ["IT", "AKSESORË", "Kabllo", "USB-C"],
+      ).categoryPath,
+    ).toBe("IT > AKSESORË > Kabllo > USB-C");
+    expect(
+      productModel({ ...item, NavigationPath: [] }, [
+        "IT",
+        "AKSESORË",
+        "Kabllo",
+        "USB-C",
+      ]).categoryPath,
+    ).toBe("IT > AKSESORË > Kabllo > USB-C");
+  });
+  test("keeps a product's own different primary breadcrumb instead of mixing unrelated branches", () => {
+    expect(
+      productModel(
+        { ...item, NavigationPath: [{ Name: "TELEFONIA" }, { Name: "USB-C" }] },
+        ["IT", "AKSESORË", "Kabllo", "USB-C"],
+      ).categoryPath,
+    ).toBe("TELEFONIA > USB-C");
+  });
+});

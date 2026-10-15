@@ -62,6 +62,84 @@ describe("durable incremental catalog refresh", () => {
   afterAll(async () => {
     await db.onModuleDestroy();
   });
+  test("returns the complete source category tree including empty branches and isolates organizations", async () => {
+    const emptyPath = "IT > AKSESORË > Mouse > Mouse Pad";
+    await db.query(
+      "INSERT INTO catalog_source_categories(organization_id,source_id,parent_source_id,name,path,source_url) VALUES($1,999,998,'Mouse Pad',$2,'https://www.neptun-ks.com/Mouse_Pad.nspx')",
+      [org, emptyPath],
+    );
+    const products = new ProductsRepository(db);
+    const facets = await products.facets(org);
+    expect(facets.sourceCategories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 999,
+          parentId: 998,
+          name: "Mouse Pad",
+          categoryPath: emptyPath,
+          path: ["IT", "AKSESORË", "Mouse", "Mouse Pad"],
+        }),
+      ]),
+    );
+    expect(facets.sourceCategories[0]?.lastSeenAt).toMatch(/^\d{4}-/);
+    expect((await products.facets(randomUUID())).sourceCategories).toEqual([]);
+  });
+  test("fetches every pagination page and preserves all four category levels on every product", async () => {
+    const isolated = (
+      await db.query<{ id: string }>(
+        "INSERT INTO organizations(name,slug) VALUES('Pagination fixture',$1) RETURNING id",
+        [randomUUID()],
+      )
+    )[0]!.id;
+    const items: SiteObject[] = Array.from({ length: 104 }, (_, index) => ({
+      ...model(String(900000 + index), `Mouse pad ${index}`),
+      Category: { Id: 174, Name: "Mouse Pad", Url: "mouse_pad" },
+      NavigationPath: [{ Name: "IT" }, { Name: "Mouse Pad" }],
+    }));
+    const pages: number[] = [];
+    const transport: SourceTransport = {
+      async get(value) {
+        const url = new URL(value);
+        if (url.pathname === "/")
+          return '<nav id="mainNMenu"><ul><li><a data-label-parent="root">IT</a><ul><li><a data-label-parent="accessories">AKSESORË</a><ul><li><a data-label-parent="mouse">Mouse</a><ul><li><a href="/Mouse_Pad.nspx">Mouse Pad</a></li></ul></li></ul></li></ul></li></ul></nav>';
+        if (url.pathname === "/Mouse_Pad.nspx") {
+          const page = Number(url.searchParams.get("page"));
+          pages.push(page);
+          return html("categorydetails", {
+            Id: 174,
+            ParentId: 173,
+            NumberOfProducts: 104,
+            Products: items.slice((page - 1) * 100, page * 100),
+          });
+        }
+        return html(
+          "productModel",
+          items.find((item) => url.pathname.endsWith(String(item.Url)))!,
+        );
+      },
+    };
+    const run = await repository.enqueue(isolated, "manual");
+    await processCatalogRefresh(
+      db,
+      { organizationId: isolated, runId: run.runId! },
+      transport,
+    );
+    expect(pages).toEqual([1, 2]);
+    expect(await repository.status(isolated)).toMatchObject({
+      status: "completed",
+      processed: 104,
+      total: 104,
+      failedProducts: 0,
+    });
+    const rows = await db.query<{ count: string; paths: string[] }>(
+      "SELECT count(*)::text count,array_agg(DISTINCT category_path) paths FROM products WHERE organization_id=$1 AND deleted_at IS NULL",
+      [isolated],
+    );
+    expect(rows[0]).toEqual({
+      count: "104",
+      paths: ["IT > AKSESORË > Mouse > Mouse Pad"],
+    });
+  });
   test("allows one scheduled run per Belgrade day while manual refresh stays available", async () => {
     const dailyOrg = (
       await db.query<{ id: string }>(

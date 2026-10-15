@@ -170,7 +170,11 @@ export async function processCatalogRefresh(
         });
       const category = categories.get(Number(entry.model.Category?.Id));
       const path = category?.path ?? entry.path;
-      const fingerprint = hash({ model: entry.model, path });
+      const fingerprint = hash({
+        model: entry.model,
+        path,
+        hierarchyVersion: 2,
+      });
       const previous = current?.source;
       const lastDetails =
         typeof previous?.detailCheckedAt === "string"

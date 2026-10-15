@@ -175,19 +175,39 @@ export class ProductsRepository {
     );
   }
   async facets(organizationId: string) {
-    const rows = await this.db.query<{
-      category: string;
-      subcategory: string;
-      brand: string;
-      categoryPath: string;
-    }>(
-      `SELECT DISTINCT category,subcategory,brand,category_path "categoryPath" FROM products WHERE organization_id=$1 AND deleted_at IS NULL`,
-      [organizationId],
-    );
+    const [rows, sourceRows] = await Promise.all([
+      this.db.query<{
+        category: string;
+        subcategory: string;
+        brand: string;
+        categoryPath: string;
+      }>(
+        `SELECT DISTINCT category,subcategory,brand,category_path "categoryPath" FROM products WHERE organization_id=$1 AND deleted_at IS NULL`,
+        [organizationId],
+      ),
+      this.db.query<{
+        id: number;
+        parentId: number;
+        name: string;
+        categoryPath: string;
+        url: string;
+        lastSeenAt: Date;
+      }>(
+        `SELECT source_id id,parent_source_id "parentId",name,path "categoryPath",source_url url,last_seen_at "lastSeenAt" FROM catalog_source_categories WHERE organization_id=$1 ORDER BY path,source_id`,
+        [organizationId],
+      ),
+    ]);
     return {
       categories: [...new Set(rows.map((x) => x.category))].sort(),
       brands: [...new Set(rows.map((x) => x.brand).filter(Boolean))].sort(),
       paths: rows,
+      // The website menu also contains empty branches. Do not derive its tree
+      // only from products or legacy product-category labels.
+      sourceCategories: sourceRows.map((row) => ({
+        ...row,
+        path: row.categoryPath.split(" > ").filter(Boolean),
+        lastSeenAt: row.lastSeenAt.toISOString(),
+      })),
     };
   }
   private view(row: ProductRow): ProductView {
