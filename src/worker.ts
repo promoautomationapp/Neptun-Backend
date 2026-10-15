@@ -66,18 +66,6 @@ async function main(): Promise<void> {
     {},
     { tz: "Europe/Belgrade" },
   );
-  // A local machine can be asleep at 03:00. Catch up after startup without
-  // launching another crawl when a manual/daily job is already running.
-  for (const organization of await db.query<{ id: string }>(
-    "SELECT id FROM organizations WHERE slug='neptun'",
-  )) {
-    const status = await catalog.status(organization.id);
-    if (
-      !status.lastSuccessfulAt ||
-      Date.now() - Date.parse(status.lastSuccessfulAt) > 86_400_000
-    )
-      await catalog.enqueue(organization.id, "daily");
-  }
   await boss.work<{ organizationId: string; runId: string }>(
     "catalog-refresh",
     { batchSize: 1 },

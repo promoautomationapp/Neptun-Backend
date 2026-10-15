@@ -101,6 +101,18 @@ export class CatalogRepository {
         ).rows.length
       )
         return;
+      // Scheduled delivery/restarts must not create a second daily crawl.
+      // Manual refreshes remain available even after today's scheduled run.
+      if (
+        trigger === "daily" &&
+        (
+          await client.query(
+            "SELECT id FROM catalog_sync_runs WHERE organization_id=$1 AND trigger='daily' AND (created_at AT TIME ZONE 'Europe/Belgrade')::date=(now() AT TIME ZONE 'Europe/Belgrade')::date LIMIT 1",
+            [organizationId],
+          )
+        ).rows.length
+      )
+        return;
       const run = (
         await client.query<{ id: string }>(
           "INSERT INTO catalog_sync_runs(organization_id,trigger,created_by) VALUES($1,$2,$3) RETURNING id",

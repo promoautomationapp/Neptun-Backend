@@ -62,6 +62,44 @@ describe("durable incremental catalog refresh", () => {
   afterAll(async () => {
     await db.onModuleDestroy();
   });
+  test("allows one scheduled run per Belgrade day while manual refresh stays available", async () => {
+    const dailyOrg = (
+      await db.query<{ id: string }>(
+        "INSERT INTO organizations(name,slug) VALUES('Daily schedule test',$1) RETURNING id",
+        [randomUUID()],
+      )
+    )[0]!.id;
+    const first = await repository.enqueue(dailyOrg, "daily");
+    await db.query(
+      "UPDATE catalog_sync_runs SET status='completed',completed_at=now() WHERE id=$1",
+      [first.runId],
+    );
+    const repeated = await Promise.all([
+      repository.enqueue(dailyOrg, "daily"),
+      repository.enqueue(dailyOrg, "daily"),
+    ]);
+    expect(repeated.every((run) => run.runId === first.runId)).toBe(true);
+    const manual = await repository.enqueue(dailyOrg, "manual");
+    expect(manual.runId).not.toBe(first.runId);
+    await db.query(
+      "UPDATE catalog_sync_runs SET status='completed',completed_at=now() WHERE id=$1",
+      [manual.runId],
+    );
+    await db.query(
+      "UPDATE catalog_sync_runs SET created_at=created_at-interval '1 day' WHERE id=$1",
+      [first.runId],
+    );
+    const tomorrow = await repository.enqueue(dailyOrg, "daily");
+    expect(tomorrow.runId).not.toBe(first.runId);
+    expect(
+      (
+        await db.query<{ count: string }>(
+          "SELECT count(*) count FROM catalog_sync_runs WHERE organization_id=$1 AND trigger='daily'",
+          [dailyOrg],
+        )
+      )[0]!.count,
+    ).toBe("2");
+  });
   test("repairs legacy hierarchy and de-duplicates concurrent queued refreshes", async () => {
     expect(await repository.repairHierarchy(org)).toBe(2);
     const [a, b] = await Promise.all([

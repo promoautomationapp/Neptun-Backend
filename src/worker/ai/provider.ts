@@ -26,6 +26,13 @@ import { env } from "../../config/environment";
 import { productImageSearchInputSchema } from "../../modules/ai/domain/product-image-search";
 import { verifyProductImage } from "./product-image-search";
 import { downloadPublic } from "./public-download";
+import { estimateAiCost } from "../../modules/ai/domain/pricing";
+export interface ProviderUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+  usageJson?: JsonObject;
+}
 export interface ProviderOutput {
   bytes?: Buffer;
   mimeType?: string;
@@ -34,12 +41,14 @@ export interface ProviderOutput {
   inputTokens: number | null;
   outputTokens: number | null;
   costUsd: number | null;
+  usageJson?: JsonObject;
 }
 export interface AiProvider {
   run(
     operation: AiOperation,
     params: JsonObject,
     model: string,
+    recordUsage?: (usage: ProviderUsage) => Promise<void>,
   ): Promise<ProviderOutput>;
 }
 export class ProviderHttpError extends Error {
@@ -90,6 +99,7 @@ const replySchema = z.object({
     .object({
       input_tokens: z.number().optional(),
       output_tokens: z.number().optional(),
+      input_tokens_details: jsonObject.optional(),
     })
     .optional(),
 });
@@ -154,6 +164,7 @@ export class OpenAiProvider implements AiProvider {
     operation: AiOperation,
     params: JsonObject,
     model: string,
+    recordUsage?: (usage: ProviderUsage) => Promise<void>,
   ): Promise<ProviderOutput> {
     let endpoint = "responses";
     let body: JsonObject;
@@ -231,14 +242,18 @@ export class OpenAiProvider implements AiProvider {
       const context =
         input.context === "brochure"
           ? "brochure cover"
-          : input.context === "tv" ? "television wallpaper" : "social media product promotion";
+          : input.context === "tv"
+            ? "television wallpaper"
+            : "social media product promotion";
       const products = input.products.map((x) => ({
         name: x.name.slice(0, 120),
         category: x.category?.slice(0, 80) ?? "",
       }));
       body = {
         model,
-        ...(input.image ? { images: [{ image_url: await this.image(input.image) }] } : {}),
+        ...(input.image
+          ? { images: [{ image_url: await this.image(input.image) }] }
+          : {}),
         size:
           input.orientation === "landscape"
             ? "1536x1024"
@@ -399,11 +414,27 @@ export class OpenAiProvider implements AiProvider {
     } catch {
       throw new ProviderUncertainError();
     }
-    const usage = {
+    const usage: ProviderUsage = {
       inputTokens: result.usage?.input_tokens ?? null,
       outputTokens: result.usage?.output_tokens ?? null,
       costUsd: null,
+      usageJson: {
+        ...(result.usage ?? {}),
+        ...(response.headers.get("x-request-id")
+          ? { provider_request_id: response.headers.get("x-request-id") }
+          : {}),
+        ...(operation === "product_image_search"
+          ? {
+              web_search_calls:
+                result.output?.filter((item) => item.type === "web_search_call")
+                  .length ?? 0,
+            }
+          : {}),
+      },
     };
+    usage.costUsd = estimateAiCost(model, operation, usage).costUsd;
+    // Record the provider's billable response before photo validation/download/storage.
+    await recordUsage?.(usage);
     if (endpoint.startsWith("images/")) {
       const base64 = result.data?.[0]?.b64_json;
       if (!base64) throw new ProviderUncertainError();

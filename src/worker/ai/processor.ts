@@ -5,7 +5,11 @@ import type { AiResultRow, AiJobRow } from "../../modules/ai/domain/request";
 import { belgradeMonth } from "../../modules/ai/domain/request";
 import { ingestAsset } from "../../modules/assets/asset-ingest";
 import { env } from "../../config/environment";
-import type { AiProvider, ProviderOutput } from "./provider";
+import type { AiProvider, ProviderOutput, ProviderUsage } from "./provider";
+import {
+  PRICING_VERSION,
+  estimateAiCost,
+} from "../../modules/ai/domain/pricing";
 import { ProofreadReuse } from "./proofread-reuse";
 import { ProviderHttpError, ProviderUncertainError } from "./provider";
 const payloadSchema = z.object({ organizationId: z.uuid(), jobId: z.uuid() });
@@ -58,6 +62,30 @@ export async function processAiJob(
     )
   )[0];
   if (!result) throw new Error("AI result missing.");
+  let usageRecorded = false;
+  const recordUsage = async (usage: ProviderUsage) => {
+    if (usageRecorded) return;
+    const cost =
+      usage.costUsd ??
+      estimateAiCost(result.model, result.operation, usage).costUsd;
+    await db.query(
+      "INSERT INTO ai_usage(organization_id,job_id,operation,model,input_tokens,output_tokens,cost_usd,user_id,month,pricing_version,usage_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(organization_id,job_id) WHERE job_id IS NOT NULL DO NOTHING",
+      [
+        org,
+        jobId,
+        result.operation,
+        result.model,
+        usage.inputTokens,
+        usage.outputTokens,
+        cost,
+        result.created_by,
+        belgradeMonth(),
+        PRICING_VERSION,
+        usage.usageJson ?? {},
+      ],
+    );
+    usageRecorded = true;
+  };
   const reuse =
     result.operation === "proofread"
       ? await ProofreadReuse.acquire(
@@ -85,8 +113,10 @@ export async function processAiJob(
                 regenerate: row.payload.regenerate === true,
               },
               result.model,
+              recordUsage,
             );
         providerSucceeded = providerCalled;
+        if (providerCalled) await recordUsage(output);
         if (reuse && plan && providerCalled)
           output.json = await reuse.complete(plan.missing, output);
         const asset = output.bytes
@@ -123,21 +153,6 @@ export async function processAiJob(
             "UPDATE ai_jobs SET status='succeeded',last_error=NULL,finished_at=now() WHERE organization_id=$1 AND id=$2",
             [org, jobId],
           );
-          if (providerCalled)
-            await client.query(
-              "INSERT INTO ai_usage(organization_id,job_id,operation,model,input_tokens,output_tokens,cost_usd,user_id,month) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-              [
-                org,
-                jobId,
-                result.operation,
-                result.model,
-                output.inputTokens,
-                output.outputTokens,
-                output.costUsd,
-                result.created_by,
-                belgradeMonth(),
-              ],
-            );
           if (result.operation === "brand_prep" && asset) {
             const brand = String(result.params_json.brand ?? "")
               .trim()

@@ -65,8 +65,8 @@ export class AiController {
     @Req() req: AuthenticatedRequest,
     @QueryParam("month") month?: string,
   ) {
-    if (req.actor.role !== "admin")
-      throw new ForbiddenException("Only administrators can view AI usage.");
+    if (req.actor.accountRole !== "superadmin")
+      throw new ForbiddenException("Only superadmins can view AI usage.");
     return this.queries.execute(
       new GetAiUsageQuery(
         req.actor.organizationId,
