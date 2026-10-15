@@ -17,6 +17,7 @@ import { LocalStorage } from "./modules/storage/local.storage";
 import { R2Storage } from "./modules/storage/r2.storage";
 import { generateVariants } from "./worker/variants.processor";
 import type { JsonObject } from "./shared/json";
+import { recoverInterruptedCatalogJobs } from "./worker/catalog-recovery";
 
 async function main(): Promise<void> {
   const connectionString = directConnection(
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
   await boss.createQueue("catalog-refresh");
   await boss.createQueue("catalog-images");
   await boss.createQueue("catalog-brand-images");
+  await recoverInterruptedCatalogJobs(db);
   await boss.work<{
     organizationId: string;
     brandId: number;
@@ -163,7 +165,9 @@ async function main(): Promise<void> {
             expireInSeconds: row.queue === "catalog-refresh" ? 7200 : 900,
           });
           if (!sent && !(await boss.getJobById(row.queue, row.id)))
-            throw new Error(`The job queue did not accept ${row.queue}. The outbox will retry.`);
+            throw new Error(
+              `The job queue did not accept ${row.queue}. The outbox will retry.`,
+            );
           await client.query(
             "UPDATE job_outbox SET dispatched_at=now() WHERE id=$1",
             [row.id],
@@ -177,6 +181,20 @@ async function main(): Promise<void> {
     }
   };
   await dispatch();
+  let recovering = false;
+  const recoveryTimer = setInterval(() => {
+    if (stopping || recovering) return;
+    recovering = true;
+    void recoverInterruptedCatalogJobs(db)
+      .then((result) => {
+        if (result.requeued || result.failed)
+          logger.info(result, "Recovered interrupted catalog jobs");
+      })
+      .catch((error) => logger.error({ err: error }, "Catalog recovery failed"))
+      .finally(() => {
+        recovering = false;
+      });
+  }, 30_000);
   const timer = setInterval(() => {
     void dispatch();
   }, env.QUEUE_POLL_SECONDS * 1000);
@@ -184,6 +202,7 @@ async function main(): Promise<void> {
   const stop = async () => {
     stopping = true;
     clearInterval(timer);
+    clearInterval(recoveryTimer);
     await boss.stop({ graceful: true, timeout: 30_000 });
     await db.onModuleDestroy();
     process.exit(0);

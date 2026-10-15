@@ -6,17 +6,17 @@ The database is Neon and media is in private Cloudflare R2. The existing Render 
 
 Connect the `Neptun-Backend` repository and choose the intended `main` branch. The backend is already at the repository root.
 
-| Setting            | Value                                                                |
-| ------------------ | -------------------------------------------------------------------- |
-| Name               | `neptun-backend`                                                     |
-| Language           | Node                                                                 |
-| Region             | Frankfurt                                                            |
-| Root directory     | Leave empty                                                          |
-| Build command      | `npm ci --include=dev && npm run build`                              |
-| Start command      | `npm run start:combined` after the owner pushes the combined runtime |
-| Health check path  | `/ready`                                                             |
-| Pre-deploy command | `node dist/scripts/migrate.js`                                       |
-| Persistent disk    | None; media is in R2                                                 |
+| Setting            | Value                                   |
+| ------------------ | --------------------------------------- |
+| Name               | `neptun-backend`                        |
+| Language           | Node                                    |
+| Region             | Frankfurt                               |
+| Root directory     | Leave empty                             |
+| Build command      | `npm ci --include=dev && npm run build` |
+| Start command      | `npm run start:combined`                |
+| Health check path  | `/ready`                                |
+| Pre-deploy command | `node dist/scripts/migrate.js`          |
+| Persistent disk    | None; media is in R2                    |
 
 The build explicitly includes development tools because TypeScript is needed during compilation even with `NODE_ENV=production`. Start and migration use compiled JavaScript. Existing applied migrations are checked and skipped safely; do not run demo seeding against the populated Neon database.
 
@@ -34,9 +34,11 @@ Ensure the local code changes have been committed and pushed by the repository o
 
 `npm run start:combined` starts the worker, waits for its PostgreSQL readiness message, then starts the API. A startup failure or either child exiting fails the whole service so Render can restart it. SIGTERM drains both processes, with a 35-second shutdown deadline. The API receives a 192 MB JavaScript heap limit and the worker 160 MB; image processing uses one native thread and a 16 MB Sharp cache. These are heap/cache limits, not a guarantee of total process memory use. Watch Render memory under real workloads and move the worker to a separate service if usage requires it.
 
-Until the owner pushes this source, the Render Start Command contains the same tested standalone supervisor inline as `exec node -e '…'`, using the API and worker already compiled in the deployed commit. A local copy is in the ignored `artifacts/render-combined-start-command.txt`. After pushing the source, replace the inline command with `npm run start:combined`. Do not switch commands before that source is available to Render.
+The Render Start Command is `npm run start:combined`, using the supervisor committed in this repository. Keep startup code in the repository so it is reviewed, tested and built with the application. Deploy the matching source before selecting a new package script in Render.
 
 The worker registers `0 3 * * *` in `Europe/Belgrade` in PostgreSQL-backed PgBoss. It catches up on startup if no successful catalog refresh exists within 24 hours. Queues handle catalog/category updates, cached media variants, and AI work requested for new content. Run one worker and stop any local production worker before activating the hosted replacement. A separate paid Background Worker is optional, not required for this initial deployment.
+
+Catalog runs send heartbeats every 15 seconds. On startup and every 30 seconds, the worker recovers interrupted catalog jobs whose heartbeat is over 90 seconds old. Recovery updates the existing queue job and run atomically, preserves their identities, and leaves healthy runs alone. Three interrupted retries are allowed; repeated interruptions fail visibly and release the active-run constraint so an operator can start a fresh refresh. Completed product updates and media caches survive a restart.
 
 ## Frontend and media
 
