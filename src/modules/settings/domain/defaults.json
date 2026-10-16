@@ -271,7 +271,7 @@
     "automaticProductLayout": true,
     "format": "neptun1080x1350",
     "layout": "grid6portrait",
-    "coverTemplate": "blueRibbon",
+    "coverTemplate": "blueClean",
     "coverProductLayout": "pair",
     "coverLogoStyle": "original",
     "coverLogoSource": "/api/assets/legacy/assets/neptun-cover-logo.png",

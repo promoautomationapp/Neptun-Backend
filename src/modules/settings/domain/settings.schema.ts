@@ -121,7 +121,7 @@ export const brochureDefaultsSchema = z
       .default("grid6portrait"),
     coverTemplate: z
       .enum(["photo", "blueRibbon", "blueClean", "redBlue"])
-      .default("blueRibbon"),
+      .default("blueClean"),
     coverProductLayout: z.enum(["pair", "hero", "row"]).default("pair"),
     coverLogoStyle: z
       .enum(["original", "framed", "custom"])
