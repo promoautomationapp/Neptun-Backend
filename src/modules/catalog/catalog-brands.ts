@@ -18,15 +18,41 @@ export class CatalogBrandsRepository {
         return `$${values.length}`;
       },
     );
-    const brands = await this.db.query<{
+    type Brand = {
       source_id: number;
       name: string;
       source_url: string;
       asset_id: string | null;
       error: string | null;
-    }>(
-      `SELECT b.source_id,b.name,b.source_url,b.asset_id,b.error FROM catalog_source_brands b WHERE b.organization_id=$1${scope ? ` AND EXISTS(SELECT 1 FROM products p WHERE p.organization_id=b.organization_id AND p.deleted_at IS NULL AND lower(p.brand)=lower(b.name) AND ${scope})` : ""} ORDER BY b.name`,
-      values,
+    };
+    const [sourceBrands, productBrands] = await Promise.all([
+      this.db.query<Brand>(
+        `SELECT b.source_id,b.name,b.source_url,b.asset_id,b.error FROM catalog_source_brands b WHERE b.organization_id=$1${scope ? ` AND EXISTS(SELECT 1 FROM products p WHERE p.organization_id=b.organization_id AND p.deleted_at IS NULL AND lower(p.brand)=lower(b.name) AND ${scope})` : ""} ORDER BY b.name`,
+        values,
+      ),
+      this.db.query<{ name: string }>(
+        `SELECT DISTINCT btrim(p.brand) name FROM products p WHERE p.organization_id=$1 AND p.deleted_at IS NULL AND btrim(p.brand)<>''${scope ? ` AND ${scope}` : ""} ORDER BY name`,
+        values,
+      ),
+    ]);
+    // Image ingestion is independent of brand discovery. A missing logo must
+    // never remove a manufacturer already present in the allowed catalog.
+    const byName = new Map(
+      sourceBrands.map((brand) => [brand.name.trim().toUpperCase(), brand]),
+    );
+    for (const brand of productBrands) {
+      const key = brand.name.trim().toUpperCase();
+      if (!byName.has(key))
+        byName.set(key, {
+          source_id: 0,
+          name: brand.name.trim(),
+          source_url: "",
+          asset_id: null,
+          error: null,
+        });
+    }
+    const brands = [...byName.values()].sort((a, b) =>
+      a.name.localeCompare(b.name),
     );
     return {
       brands: brands.map((brand) => ({
