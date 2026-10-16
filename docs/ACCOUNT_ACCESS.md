@@ -36,3 +36,13 @@ An unconfigured sender is visible as `emailConfigured:false` in the administrato
 Inspect delivery with `SELECT kind,status,attempts,created_at,sent_at,error FROM email_outbox ORDER BY created_at DESC`. Do not log decrypted payloads or tokens. Administrator mutations and password changes are recorded in `account_audit`; public endpoints use database-backed rate limits. The development and automated tests use a disabled sender; no real emails are sent.
 
 Brochure review notifications and mention delivery are described in [Review notifications](NOTIFICATIONS.md).
+
+## Staff and PM workspace controls
+
+Invitations and user updates accept an optional `access` object. The team editor keeps these controls collapsed by default. Choose usual role access or custom access, then use switches for disabling brochures, opening social posts, and browsing the product catalog. Catalog access can cover all categories or selected branches from the workspace's searchable category tree; selecting a parent includes all its descendants. Existing shared brochures keep their saved product snapshots and remain visible.
+
+The object contains `mode` (`default` or `custom`), `canDisableBrochures`, `canViewSocialPosts`, `canViewCatalog`, and `catalogCategoryPaths` (`null` for all branches, otherwise at most 100 canonical paths). Missing access, `null`, and default mode preserve normal role behavior. Admins and superadmins retain full workspace access. Controls cannot grant administrative or review privileges beyond the user's role.
+
+Restrictions are stored on the organization membership, validated against that workspace's catalog/source paths, and returned in managed-user and session responses. Every authenticated request reads current membership permissions. Catalog list, batch/code lookup, facets and brand endpoints enforce the same category scope; direct social reads/writes and brochure disable actions enforce their feature permission. Scope filters use bound SQL values and escape wildcard characters. A malformed custom restriction fails closed.
+
+Permission updates are recorded in `account_audit` and normal request activity with the administrator, time, result and request metadata. The interface refreshes sessions on focus/visibility and every minute while visible, removes newly forbidden navigation/actions, cancels catalog loads, and clears restricted catalog views without remounting the workspace shell. Temporary network failures retain the open workspace; revoked/disabled sessions return to sign-in. Role/status changes retain the existing session-revocation behavior. Verified disabled users can be re-enabled without SMTP or another email verification; unverified cancelled invitations still require a fresh invitation.
