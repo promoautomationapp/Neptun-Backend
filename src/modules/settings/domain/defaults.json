@@ -270,9 +270,9 @@
   "brochure": {
     "automaticProductLayout": true,
     "format": "neptun1080x1350",
-    "layout": "grid6portrait",
+    "layout": "feature3",
     "coverTemplate": "blueClean",
-    "coverProductLayout": "pair",
+    "coverProductLayout": "hero",
     "coverLogoStyle": "original",
     "coverLogoSource": "/api/assets/legacy/assets/neptun-cover-logo.png",
     "neptunLogoOption": "classic",
@@ -290,13 +290,21 @@
     "coverTypeColor": "#ffffff",
     "coverFooterColor": "#ffffff",
     "productBackground": {
-      "color": "#1c4075",
-      "gradient": null,
+      "color": "",
+      "gradient": {
+        "from": "#1f5687",
+        "to": "#38739f",
+        "angle": 110
+      },
       "image": ""
     },
     "coverBackground": {
-      "color": "#1c4075",
-      "gradient": null,
+      "color": "",
+      "gradient": {
+        "from": "#1f5687",
+        "to": "#38739f",
+        "angle": 110
+      },
       "image": ""
     },
     "storesBackground": {
@@ -316,15 +324,18 @@
       "icon": true
     },
     "contactVisibility": {},
-    "showInteriorFooter": true,
-    "showFooterPageNumber": true,
+    "showInteriorFooter": false,
+    "showFooterPageNumber": false,
     "pricePalette": {
       "red": "#ef4023",
       "blue": "#243a6a",
       "blueBand": "#e7eae9",
       "saving": "#ef4023"
-    }
+    },
+    "footerStyle": "reference"
   },
   "hiddenBuiltinLogos": [],
-  "logoRules": []
+  "logoRules": [],
+  "brochurePresets": [],
+  "defaultBrochurePresetId": "neptun-current"
 }

@@ -19,7 +19,7 @@ describe("settings contracts", () => {
       referenceDetail: { keep: true },
       brochure: {
         format: "neptun1080x1350",
-        layout: "grid6portrait",
+        layout: "feature3",
         showCoverLogo: true,
         showCoverBand: false,
       },

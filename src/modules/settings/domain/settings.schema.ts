@@ -15,9 +15,24 @@ const json: z.ZodType<Value> = z.lazy(() =>
 );
 const text = z.string().max(20000);
 const color = z.union([z.literal(""), z.string().regex(/^#[0-9a-f]{6}$/i)]);
+export const pageDecorationSchema = z.object({
+  showHeader: z.boolean().optional(),
+  showOnlineLogo: z.boolean().optional(),
+  showFooterLogo: z.boolean().optional(),
+  showFooterLine: z.boolean().optional(),
+  footerLineColor: color.optional(),
+  footerLogoColor: color.optional(),
+  headerColor: color.optional(),
+  headerTextColor: color.optional(),
+});
 const savingMode = z.enum(["amount", "percentage"]);
 const source = z.union([
   z.literal(""),
+  z
+    .string()
+    .regex(
+      /^\/brochure-presets\/(?:[a-z0-9-]+\/)*[a-z0-9-]+\.(?:svg|png|webp)$/i,
+    ),
   z
     .string()
     .max(2000)
@@ -116,13 +131,24 @@ export const brochureDefaultsSchema = z
       .union([z.enum(FORMAT_IDS), z.string().regex(/^custom-[a-z0-9-]{1,90}$/)])
       .default("neptun1080x1350"),
     automaticProductLayout: z.boolean().default(true),
+    brochureVisualStyle: z.enum(["current", "october"]).optional(),
+    pageDecorationDefaults: pageDecorationSchema.optional(),
     layout: z
-      .enum(["grid6portrait", "grid6", "grid9", "classic8", "duo4"])
-      .default("grid6portrait"),
+      .enum([
+        "feature3",
+        "tv8",
+        "grid6portrait",
+        "grid6",
+        "grid9",
+        "classic8",
+        "duo4",
+        "pair2",
+      ])
+      .default("feature3"),
     coverTemplate: z
       .enum(["photo", "blueRibbon", "blueClean", "redBlue"])
       .default("blueClean"),
-    coverProductLayout: z.enum(["pair", "hero", "row"]).default("pair"),
+    coverProductLayout: z.enum(["pair", "hero", "row"]).default("hero"),
     coverLogoStyle: z
       .enum(["original", "framed", "custom"])
       .default("original"),
@@ -140,6 +166,8 @@ export const brochureDefaultsSchema = z
       .prefault(defaults.brochure.pricePalette),
     installments: z.number().int().min(1).max(60).default(12),
     paymentText: text.default(""),
+    footerStyle: z.enum(["bar", "reference"]).default("reference"),
+    showCoverFooter: z.boolean().optional(),
     showCoverLogo: z.boolean().default(true),
     showCoverBand: z.boolean().default(false),
     showCoverHeadline: z.boolean().default(false),
@@ -169,8 +197,8 @@ export const brochureDefaultsSchema = z
       })
       .prefault({}),
     contactVisibility: z.record(z.string().max(100), z.boolean()).default({}),
-    showInteriorFooter: z.boolean().default(true),
-    showFooterPageNumber: z.boolean().default(true),
+    showInteriorFooter: z.boolean().default(false),
+    showFooterPageNumber: z.boolean().default(false),
   })
   .catchall(json)
   .superRefine((value, ctx) => {
@@ -187,10 +215,122 @@ export const brochureDefaultsSchema = z
         message: "Choose the default price logo.",
       });
   });
+/** Only presentation fields belong to a reusable brochure design. */
+export const BROCHURE_DESIGN_KEYS = [
+  "brochureVisualStyle",
+  "brochureFormat",
+  "brochureFormatSnapshot",
+  "layout",
+  "autoProductLayout",
+  "coverTemplate",
+  "coverProductLayout",
+  "coverLogoStyle",
+  "coverLogoSource",
+  "neptunLogoOption",
+  "priceLogo",
+  "customPriceLogo",
+  "offerStyle",
+  "savingMode",
+  "pricePalette",
+  "installments",
+  "paymentText",
+  "brochureFooter",
+  "showCoverLogo",
+  "showCoverBand",
+  "showCoverHeadline",
+  "showCoverMessage",
+  "showCoverGradient",
+  "coverHeadline",
+  "coverBrandTagline",
+  "tagline",
+  "coverMessageColor",
+  "coverHeadlineColor",
+  "coverTypeColor",
+  "coverFooterColor",
+  "coverBackgroundColor",
+  "coverBackgroundGradient",
+  "coverBackgroundImage",
+  "coverImage",
+  "productBackgroundColor",
+  "productBackgroundGradient",
+  "productBackgroundImage",
+  "storesBackgroundColor",
+  "storesBackgroundGradient",
+  "storesBackgroundImage",
+  "includeStoresPage",
+  "includeStoresFooter",
+  "showOnlineStore",
+  "showInteriorFooter",
+  "showFooterPageNumber",
+  "storeFields",
+  "contactVisibility",
+  "storesHiddenElements",
+  "storeFooterHiddenElements",
+  "compactStoresFooterHeight",
+  "automaticSavings",
+  "categoryPathSavingModes",
+  "categorySavingModes",
+  "logoRules",
+  "logoRuleDefaults",
+  "brandAssets",
+  "brandLogos",
+  "iconDefaults",
+  "productDesign",
+  "pageDecorationDefaults",
+  "coverOverlayGradient",
+  "coverGradientRegion",
+  "coverHeadlinePosition",
+  "coverHeadlineStyle",
+  "pageArtworks",
+  "coverElementPlacements",
+  "storesElementPlacements",
+  "storeFooterElementPlacements",
+  "coverTextColorOverrides",
+] as const;
+const priceStyle = z.preprocess(
+  (value) =>
+    value === "minimal" ? "current" : value === "compact" ? "card" : value,
+  z.enum(["current", "card"]),
+);
+export const brochurePresetSchema = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
+  name: z.string().trim().min(1).max(120),
+  design: z
+    .object({
+      brochureVisualStyle: z.enum(["current", "october"]).optional(),
+      coverBrandTagline: z.string().max(500).optional(),
+      offerStyle: priceStyle.optional(),
+      pageDecorationDefaults: pageDecorationSchema.optional(),
+      productDesign: productDesignSchema.optional(),
+      productBackgroundColor: color.optional(),
+      coverBackgroundColor: color.optional(),
+      storesBackgroundColor: color.optional(),
+      coverBackgroundGradient: gradient.nullable().optional(),
+      productBackgroundGradient: gradient.nullable().optional(),
+      storesBackgroundGradient: gradient.nullable().optional(),
+      coverBackgroundImage: source.optional(),
+      productBackgroundImage: source.optional(),
+      storesBackgroundImage: source.optional(),
+      coverImage: source.optional(),
+      installments: z.number().int().min(1).max(60).optional(),
+    })
+    .catchall(json)
+    .superRefine((design, ctx) => {
+      for (const key of Object.keys(design))
+        if (!(BROCHURE_DESIGN_KEYS as readonly string[]).includes(key))
+          ctx.addIssue({
+            code: "custom",
+            path: [key],
+            message: "Presets contain design choices only.",
+          });
+    }),
+});
 export const workspaceSettingsSchema = z
   .object({
     schemaVersion: z.literal(1).default(1),
     customFormats: z.array(customBrochureFormatSchema).max(100).default([]),
+    brochurePresets: z.array(brochurePresetSchema).max(100).default([]),
+    defaultBrochurePresetId: z.string().max(100).default("neptun-current"),
     stores: z
       .array(
         z
@@ -207,9 +347,7 @@ export const workspaceSettingsSchema = z
       .max(200)
       .prefault(defaults.stores),
     contact: z.record(z.string().max(100), text).prefault(defaults.contact),
-    offerStyle: z
-      .enum(["current", "card", "minimal", "compact"])
-      .default("current"),
+    offerStyle: priceStyle.default("current"),
     savingMode: savingMode.default("amount"),
     brochure: brochureDefaultsSchema.prefault({}),
     productDesign: productDesignSchema.prefault({}),
@@ -304,6 +442,7 @@ export const workspaceSettingsSchema = z
       "campaignTypes",
       "logoLibrary",
       "customFormats",
+      "brochurePresets",
     ] as const) {
       const ids = value[key]
         .map((item) => item.id)
@@ -315,6 +454,19 @@ export const workspaceSettingsSchema = z
           message: "Every item must have a unique ID.",
         });
     }
+    if (
+      !["neptun-current", "neptun-october"].includes(
+        value.defaultBrochurePresetId,
+      ) &&
+      !value.brochurePresets.some(
+        (preset) => preset.id === value.defaultBrochurePresetId,
+      )
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["defaultBrochurePresetId"],
+        message: "Choose an available brochure preset.",
+      });
     if (
       value.brochure.format.startsWith("custom-") &&
       !value.customFormats.some(

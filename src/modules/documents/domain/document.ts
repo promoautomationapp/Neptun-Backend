@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pageDecorationSchema } from "../../settings/domain/settings.schema";
 import { identifier, jsonValue, jsonObject } from "../../../shared/json";
 export const statuses = [
   "in_progress",
@@ -43,10 +44,47 @@ export const historySchema = z
     commentId: z.string().nullable().optional(),
   })
   .catchall(jsonValue);
+export const brochureFooterSchema = z.object({
+  style: z.enum(["bar", "reference"]).optional(),
+  visible: z.boolean().optional(),
+  dateText: z.string().max(2000).optional(),
+  bottom: z.number().min(0).max(80).optional(),
+  height: z.number().min(2).max(12).optional(),
+  dateWidth: z.number().min(15).max(55).optional(),
+  dateSize: z.number().min(0.8).max(3.5).optional(),
+  paymentSize: z.number().min(0.7).max(3).optional(),
+  from: z
+    .string()
+    .regex(/^#[0-9a-f]{6}$/i)
+    .optional(),
+  to: z
+    .string()
+    .regex(/^#[0-9a-f]{6}$/i)
+    .optional(),
+});
 export const campaignSchema = z
   .object({
     id: identifier,
     name: z.string().min(1).max(300),
+    brochureFooter: brochureFooterSchema.optional(),
+    brochurePresetId: z.string().max(100).optional(),
+    coverBrandTagline: z.string().max(500).optional(),
+    brochureVisualStyle: z.enum(["current", "october"]).optional(),
+    pageDecorationDefaults: pageDecorationSchema.optional(),
+    pages: z
+      .record(
+        z.string(),
+        pageDecorationSchema
+          .extend({
+            headerText: z.string().max(2000).optional(),
+            footerNumber: z.string().max(40).optional(),
+            showFooter: z.boolean().optional(),
+            showFooterPageNumber: z.boolean().optional(),
+          })
+          .catchall(jsonValue),
+      )
+      .optional(),
+    showFooterPageNumber: z.boolean().optional(),
     products: z.array(jsonObject).max(2000),
     showCoverBand: z.boolean().default(false),
     coverMessageColor: z

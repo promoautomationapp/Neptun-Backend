@@ -6,6 +6,34 @@ import {
 } from "../../src/modules/documents/domain/document";
 
 describe("brochure JSON contract", () => {
+  test("validates editable footer geometry and preserves optional page number choices", () => {
+    const base = { id: "footer", name: "Offers", products: [] };
+    const footer = {
+      bottom: 3,
+      height: 4,
+      dateWidth: 34,
+      dateText: "Vlen 24–31 tetor",
+      from: "#f3432b",
+      to: "#205785",
+    };
+    expect(
+      campaignSchema.parse({
+        ...base,
+        brochureFooter: footer,
+        showFooterPageNumber: false,
+      }),
+    ).toMatchObject({ brochureFooter: footer, showFooterPageNumber: false });
+    expect(
+      campaignSchema.safeParse({ ...base, brochureFooter: { height: 0 } })
+        .success,
+    ).toBe(false);
+    expect(
+      campaignSchema.safeParse({
+        ...base,
+        brochureFooter: { from: "url(unsafe)" },
+      }).success,
+    ).toBe(false);
+  });
   test("the campaign DTO preserves complete page, bundle, footer and typography options", () => {
     const input = brochureFixture("rich-layout", "/assets/fixture.png");
     expect(campaignSchema.parse(input)).toEqual({

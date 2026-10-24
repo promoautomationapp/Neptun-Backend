@@ -27,7 +27,13 @@ export function brochureFixture(id: string, image: string): JsonObject {
       logo: { x: 24, y: 4, width: 52 },
       "product-shared-offer": { x: 4, y: 26, width: 92, height: 38 },
     },
-    campaignAssets: { "cover-bestbuy": { image, hidden: false, placement: { x: -2, y: -0.5, width: 110, height: 5 } } },
+    campaignAssets: {
+      "cover-bestbuy": {
+        image,
+        hidden: false,
+        placement: { x: -2, y: -0.5, width: 110, height: 5 },
+      },
+    },
     coverLogoSource: image,
     coverLogoPlacement: { x: 4, y: 2, width: 18, height: 8 },
     pages: {
@@ -74,6 +80,19 @@ export function brochureFixture(id: string, image: string): JsonObject {
         },
       ],
     },
+  brochureFooter: {
+    style: "reference",
+      visible: true,
+      dateText: "Vlen 24–31 tetor",
+      bottom: 3,
+      height: 4,
+      dateWidth: 34,
+      dateSize: 1.9,
+      paymentSize: 1.45,
+      from: "#f3432b",
+      to: "#205785",
+    },
+    showFooterPageNumber: false,
     includeStoresPage: false,
     includeStoresFooter: true,
     compactStoresFooterHeight: 18,
@@ -115,7 +134,7 @@ export function brochureFixture(id: string, image: string): JsonObject {
             category: "TV",
             image,
             screenArtwork: {
-          fit: "contain",
+              fit: "contain",
               image,
               detectedFor: image,
               box: { x: 0.09, y: 0.12, width: 0.82, height: 0.67 },
