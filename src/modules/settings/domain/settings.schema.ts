@@ -408,9 +408,12 @@ export const workspaceSettingsSchema = z
     automaticSavings: z
       .object({
         enabled: z.boolean().default(true),
-        amountThreshold: z.number().min(0).max(100000).default(50),
+        amountThreshold: z.number().min(0).max(100000).default(30),
+        basis: z
+          .enum(["offer-price", "savings-amount"])
+          .default("savings-amount"),
       })
-      .prefault({}),
+      .prefault({ basis: "offer-price" }),
     categoryPathSavingModes: z
       .record(z.string().max(1600), savingMode)
       .default({}),

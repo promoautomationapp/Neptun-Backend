@@ -62,12 +62,10 @@ function productMainImages(
   // merely finding the requested color somewhere in the page is insufficient.
   const baseInput = {
     ...input,
-    name: input.name.replace(
-      /\b(?:black|white|beige|bej|silver|gold|orange|blue|green|purple|pink|red|graphite|natural titanium|blu|zi|zezë|bardhë)\b/gi,
-      "",
-    ),
+    name: model,
     variants: [],
     details: [],
+    bundle: false,
   };
   const familyHeadings = headings.filter((heading) =>
     identityMatches(heading, baseInput, model),
@@ -125,8 +123,11 @@ function productMainImages(
         : [];
       const extraFacts = properties.flatMap((property) =>
         property && typeof property === "object"
-          ? Object.values(property as Record<string, unknown>).filter(
-              (part) => typeof part === "string",
+          ? Object.values(property as Record<string, unknown>).flatMap(
+              (part) =>
+                typeof part === "string" || typeof part === "boolean"
+                  ? [String(part)]
+                  : [],
             )
           : [],
       );

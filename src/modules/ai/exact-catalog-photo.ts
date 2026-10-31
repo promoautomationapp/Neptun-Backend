@@ -12,6 +12,7 @@ import {
   productImageSearchInputSchema,
   productPageIdentityMatches,
   productVariantFacts,
+  isProductColorFact,
   type ProductImageSearchInput,
 } from "./domain/product-image-search";
 
@@ -65,9 +66,7 @@ export function exactCatalogPhotoMatches(
     productIdentityText(input.model) !== productIdentityText(row.model)
   )
     return false;
-  const requestedColors = productVariantFacts(input).filter(
-    (fact) => !/\d/.test(fact),
-  );
+  const requestedColors = productVariantFacts(input).filter(isProductColorFact);
   const actualColors = productVariantFacts({
     ...input,
     name: row.name,
@@ -76,7 +75,7 @@ export function exactCatalogPhotoMatches(
     details: Object.entries(row.specs || {}).map(
       ([key, value]) => `${key}: ${value}`,
     ),
-  }).filter((fact) => !/\d/.test(fact));
+  }).filter(isProductColorFact);
   if (
     requestedColors.length &&
     actualColors.some((color) => !requestedColors.includes(color))

@@ -43,7 +43,7 @@ export function hasExactModelIdentifier(text: string, model: string): boolean {
 }
 export function namedProductFamily(name: string): string | undefined {
   return name.match(
-    /\b(?:iphone\s*\d+e?(?:\s*(?:pro|max|plus|mini|air)){0,2}|galaxy\s*[asz]\s*\d+(?:[a-z](?![a-z]))?(?:\s*(?:ultra|plus|fe))?|free\s*buds\s*(?:(?:se|pro)\s*)?\d+[a-z]?|free\s*clip(?:\s*2)?|airpods\s*(?:(?:pro|max)(?:\s*\d+)?|\d+))/i,
+    /\b(?:iphone\s*\d+e?(?:\s*(?:pro|max|plus|mini|air)){0,2}|galaxy\s*[asz]\s*\d+(?:[a-z](?![a-z]))?(?:\s*(?:ultra|plus|fe))?|free\s*buds\s*(?:(?:se|pro)\s*)?\d+[a-z]?|free\s*clip(?:\s*2)?|air\s*pods\s*(?:(?:pro|max)(?:\s*\d+)?|\d+))/i,
   )?.[0];
 }
 
@@ -102,7 +102,15 @@ const colorGroups = [
 export const imageIdentityText = (input: ProductImageSearchInput): string =>
   [input.name, input.model, ...input.details, ...input.variants].join(" ");
 export function productVariantFacts(input: ProductImageSearchInput): string[] {
-  const text = [input.name,...input.variants,...input.details.filter((detail) => /^(?:(?:storage|capacity|memor\w*|ram|ssd|colou?r|ngjyra)\s*:|\d+(?:[.,]\d+)?\s*(?:gb|tb)\b)/i.test(detail))].join(" ");
+  const text = [
+    input.name,
+    ...input.variants,
+    ...input.details.filter((detail) =>
+      /^(?:(?:storage|capacity|memor\w*|ram|ssd|colou?r|ngjyra)\s*:|\d+(?:[.,]\d+)?\s*(?:gb|tb)\b)/i.test(
+        detail,
+      ),
+    ),
+  ].join(" ");
   // Color facts must be explicitly supplied in the name, selected variant, or a
   // named color field; descriptions often list every available color.
   const colorText = [
@@ -117,9 +125,30 @@ export function productVariantFacts(input: ProductImageSearchInput): string[] {
       group.some((color) => hasExactModelIdentifier(colorText, color)),
     )
     .map((group) => group[0]!);
+  const editionText = [
+    input.name,
+    ...input.variants,
+    ...input.details.filter((detail) =>
+      /^(?:noise cancellation|noise cancelling|anc|connector|charging port|connection|usb)\s*:/i.test(
+        detail,
+      ),
+    ),
+  ].join(" ");
+  const editions = [
+    /\bANC\b|active noise cancell?ation/i.test(editionText)
+      ? /\b(?:without|no|pa)\s+(?:ANC|active noise cancell?ation)\b|\bnon[- ]?ANC\b/i.test(
+          editionText,
+        )
+        ? "without ANC"
+        : "ANC"
+      : "",
+    /\b(?:USB|Type)[- ]?C\b/i.test(editionText) ? "USB-C" : "",
+    /\blightning\b/i.test(editionText) ? "Lightning" : "",
+  ].filter(Boolean);
   return [
     ...new Set([
       ...colors,
+      ...editions,
       ...[...text.matchAll(/\b\d+(?:[.,]\d+)?\s*(?:gb|tb)\b/gi)].map(
         (match) => match[0],
       ),
@@ -127,10 +156,27 @@ export function productVariantFacts(input: ProductImageSearchInput): string[] {
   ];
 }
 export function matchesProductVariant(text: string, fact: string): boolean {
+  const withoutAnc =
+    /\b(?:without|no|pa)\s+(?:ANC|active noise cancell?ation)\b|\bnon[- ]?ANC\b|\b(?:ANC|(?:active )?noise cancell?ation)\s*:?\s*(?:false|no|off|disabled)\b/i.test(
+      text,
+    );
+  if (fact === "ANC")
+    return !withoutAnc && /\bANC\b|active noise cancell?ation/i.test(text);
+  if (fact === "without ANC") return withoutAnc;
+  if (fact === "USB-C")
+    return (
+      /\b(?:USB|Type)[- ]?C\b/i.test(text) &&
+      !/\b(?:without|no|pa)\s+(?:USB|Type)[- ]?C\b|\b(?:USB|Type)[- ]?C\s*:?\s*(?:false|no|off|disabled)\b/i.test(
+        text,
+      )
+    );
   const group = colorGroups.find((colors) => colors[0] === fact);
   return (group || [fact]).some((alias) =>
     hasExactModelIdentifier(text, alias),
   );
+}
+export function isProductColorFact(fact: string): boolean {
+  return colorGroups.some((group) => group[0] === fact);
 }
 export function productPageIdentityMatches(
   text: string,

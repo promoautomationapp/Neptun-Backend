@@ -3,6 +3,31 @@ import {
   workspaceSettingsSchema,
 } from "../../src/modules/settings/domain/settings.schema";
 describe("settings contracts", () => {
+  test("new savings defaults compare the offer price while old explicit rules retain their original basis", () => {
+    expect(resolveSettings(null).automaticSavings).toEqual({
+      enabled: true,
+      amountThreshold: 30,
+      basis: "offer-price",
+    });
+    expect(
+      resolveSettings({
+        automaticSavings: { enabled: true, amountThreshold: 50 },
+      }).automaticSavings,
+    ).toEqual({ enabled: true, amountThreshold: 50, basis: "savings-amount" });
+    const custom = {
+      enabled: false,
+      amountThreshold: 25,
+      basis: "offer-price",
+    };
+    expect(
+      resolveSettings({ automaticSavings: custom }).automaticSavings,
+    ).toEqual(custom);
+    expect(
+      workspaceSettingsSchema.safeParse({
+        automaticSavings: { ...custom, basis: "unknown" },
+      }).success,
+    ).toBe(false);
+  });
   test("legacy settings receive the existing design defaults without dropping fields", () => {
     const settings = resolveSettings({
       stores: [

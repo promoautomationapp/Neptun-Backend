@@ -610,3 +610,61 @@ test("a clean no-match response completes without contacting any photo server", 
   });
   expect(download).not.toHaveBeenCalled();
 });
+
+test("Air Pods 4 ANC USB-C requires that exact edition and cannot inherit the non-ANC or Lightning photo", async () => {
+  const apple = productImageSearchInputSchema.parse({
+    ...input,
+    code: "84062037",
+    name: "KUFJE APPLE AIR PODS 4 (USB-C) ANC",
+    brand: "APPLE",
+    details: ["Bluetooth: v5.3"],
+  });
+  const exact = {
+    ...candidate,
+    matchedName: apple.name,
+    matchedModel: "AirPods 4",
+  };
+  expect(namedProductFamily(apple.name)).toBe("AIR PODS 4");
+  const header = (name: string) =>
+    `<h1>${name}</h1><meta property="og:image" content="${exact.imageUrl}">`;
+  expect(
+    (
+      await verifyProductImage(
+        apple,
+        exact,
+        [exact.sourceUrl],
+        downloader(
+          header("Apple AirPods 4 with Active Noise Cancellation USB-C"),
+        ),
+      )
+    ).json.found,
+  ).toBe(true);
+  for (const wrong of [
+    "Apple AirPods 4 USB-C",
+    "Apple AirPods 4 without ANC USB-C",
+    "Apple AirPods 4 ANC Lightning",
+    "Apple AirPods 3 ANC USB-C",
+  ]) {
+    expect(
+      (
+        await verifyProductImage(
+          apple,
+          exact,
+          [exact.sourceUrl],
+          downloader(header(wrong)),
+        )
+      ).json.found,
+    ).toBe(false);
+  }
+  const disabledAnc = `<script type="application/ld+json">${JSON.stringify({ "@type": "Product", name: "Apple AirPods 4 USB-C", brand: "Apple", image: exact.imageUrl, additionalProperty: [{ name: "ANC", value: false }] })}</script>`;
+  expect(
+    (
+      await verifyProductImage(
+        apple,
+        exact,
+        [exact.sourceUrl],
+        downloader(disabledAnc),
+      )
+    ).json.found,
+  ).toBe(false);
+});
