@@ -122,3 +122,72 @@ test("mention email safely renders the comment, campaign, page and deep link wit
   expect(email.text).toContain("campaign=october&page=1&comment=thread");
   expect(email.html).not.toContain("ACCOUNT SECURITY");
 });
+
+test.each([
+  ["comment", "added a comment"],
+  ["reply", "replied to a comment"],
+  ["fix", "resolved a comment"],
+  ["submit", "sent the brochure for review"],
+  ["complete", "marked the brochure as complete"],
+  ["reopen", "reopened the brochure"],
+] as const)(
+  "%s notification identifies the actor, action, context and recipient reason",
+  (action, phrase) => {
+    const url =
+      "https://workspace.test/?campaign=brochure&page=11&comment=thread";
+    const email = accountEmail({
+      to: "staff@example.test",
+      name: "Arta",
+      kind: "workspace-notification",
+      url,
+      notification: {
+        id: "event",
+        campaignName: "Weekly offers",
+        actorName: "Besa",
+        message: "Check this price",
+        pageIndex: 11,
+        action,
+        reason: "contributor",
+        occurredAt: "2026-10-31T10:20:00Z",
+        language: "en",
+      },
+    });
+    expect(email.subject).toContain(`Besa ${phrase}`);
+    expect(email.text).toContain("Page 12");
+    expect(email.text).toContain("31 Oct 2026");
+    expect(email.text).toContain("because you worked on this document");
+    expect(email.text).toContain(url);
+    expect(email.html).toContain("#ef4023");
+    expect(email.html).toContain("#12365d");
+    expect(email.html).not.toContain("because a colleague mentioned");
+  },
+);
+test("Albanian social notification uses a post deep link, localized reason and escaped text", () => {
+  const email = accountEmail({
+    to: "pm@example.test",
+    name: "Besa",
+    kind: "workspace-notification",
+    url: "https://workspace.test/?post=post1&comment=thread",
+    notification: {
+      id: "event",
+      campaignName: "Oferta <social>",
+      actorName: "Arta",
+      message: "<script>unsafe</script>",
+      pageIndex: 0,
+      action: "fix",
+      reason: "thread",
+      documentKind: "post",
+      language: "sq",
+      occurredAt: "2026-10-31T10:20:00Z",
+    },
+  });
+  expect(email.html).toContain('lang="sq"');
+  expect(email.subject).toContain("Arta shënoi një koment si të zgjidhur");
+  expect(email.text).toContain("Postim social");
+  expect(email.text).toContain("keni marrë pjesë në këtë bisedë");
+  expect(email.text).toContain(
+    "Shiko komentin: https://workspace.test/?post=post1&comment=thread",
+  );
+  expect(email.html).not.toContain("<script>unsafe");
+  expect(email.html).toContain("&lt;script&gt;");
+});

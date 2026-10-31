@@ -6,6 +6,8 @@ import {
   hasSuppliedModel,
   productImageSearchInputSchema,
   namedProductFamily,
+  productImageSearchQueries,
+  productImageSearchCacheIdentity,
 } from "../../src/modules/ai/domain/product-image-search";
 import {
   promptVersion,
@@ -397,7 +399,202 @@ test("provider uses required web search with sources, never photo generation, wi
   expect(body.tools).toEqual([{ type: "web_search" }]);
   expect(body.tool_choice).toBe("required");
   expect(body.include).toEqual(["web_search_call.action.sources"]);
-  expect(body.input).toBe(JSON.stringify(input));
+  expect(JSON.parse(String(body.input))).toEqual({
+    product: input,
+    searchQueries: productImageSearchQueries(input),
+  });
+  expect(body.max_tool_calls).toBe(4);
+});
+
+test("search context uses explicit model, EAN, color and source while category placement shares one identity", () => {
+  const full = productImageSearchInputSchema.parse({
+    ...input,
+    model: "65ELU720GTV",
+    ean: "1234567890123",
+    subcategory: "Televisions",
+    sourceUrl: "https://manufacturer.example/tv",
+    variants: ["black"],
+  });
+  expect(productImageSearchQueries(full).join(" ")).toMatch(
+    /65ELU720GTV.*black/,
+  );
+  expect(productImageSearchQueries(full)).toContain(full.sourceUrl);
+  expect(productImageSearchCacheIdentity(full)).toEqual(
+    productImageSearchCacheIdentity({
+      ...full,
+      category: "Other category",
+      subcategory: "Another placement",
+      sourceUrl: "https://retailer.example/tv",
+    }),
+  );
+  expect(productImageSearchCacheIdentity(full)).not.toEqual(
+    productImageSearchCacheIdentity({ ...full, variants: ["white"] }),
+  );
+  expect(
+    hasSuppliedModel(
+      productImageSearchInputSchema.parse({
+        ...input,
+        name: "HUAWEI FreeClip Black",
+        brand: "HUAWEI",
+      }),
+      { ...candidate, matchedModel: "FreeClip" },
+    ),
+  ).toBe(true);
+  expect(
+    hasSuppliedModel(
+      productImageSearchInputSchema.parse({
+        ...input,
+        name: "Apple AirPods Max Blue",
+        brand: "APPLE",
+      }),
+      { ...candidate, matchedModel: "AirPods Max" },
+    ),
+  ).toBe(true);
+});
+test("a model supplied in a model field or labelled specification may establish identity without inventing it", () => {
+  const specified = productImageSearchInputSchema.parse({
+    ...input,
+    name: "FUEGO soundbar",
+    model: "F999",
+  });
+  expect(
+    hasSuppliedModel(specified, { ...candidate, matchedModel: "F999" }),
+  ).toBe(true);
+  expect(
+    hasSuppliedModel(
+      { ...specified, model: "", details: ["Model: F999"] },
+      { ...candidate, matchedModel: "F999" },
+    ),
+  ).toBe(true);
+  expect(
+    hasSuppliedModel(
+      { ...specified, model: "", details: ["Power: 1200 W"] },
+      { ...candidate, matchedModel: "1200W" },
+    ),
+  ).toBe(false);
+});
+test("official lazy galleries can bind the exact family and selected color to the original image", async () => {
+  const earbuds = productImageSearchInputSchema.parse({
+    ...input,
+    name: "HUAWEI FreeClip 2 Black",
+    brand: "HUAWEI",
+    details: [],
+  });
+  const exact = {
+    ...candidate,
+    matchedModel: "FreeClip 2",
+    matchedName: earbuds.name,
+  };
+  const html = `<h1>HUAWEI FreeClip 2</h1><img data-src="${exact.imageUrl}" alt="HUAWEI FreeClip 2 black front view, display the black color">`;
+  expect(
+    (
+      await verifyProductImage(
+        earbuds,
+        exact,
+        [exact.sourceUrl],
+        downloader(html),
+      )
+    ).json.found,
+  ).toBe(true);
+  for (const alt of [
+    "HUAWEI FreeClip 2 White",
+    "HUAWEI FreeClip Black",
+    "Black",
+    "HUAWEI FreeClip 2 Black comparison",
+    "Woman wearing HUAWEI FreeClip 2 Black",
+  ]) {
+    expect(
+      (
+        await verifyProductImage(
+          earbuds,
+          exact,
+          [exact.sourceUrl],
+          downloader(
+            `<h1>HUAWEI FreeClip 2</h1><img src="${exact.imageUrl}" alt="${alt}">`,
+          ),
+        )
+      ).json.found,
+    ).toBe(false);
+  }
+});
+test("JSON-LD variant color and model metadata bind Beige SE3 without allowing SE2 or a standalone bundle substitute", async () => {
+  const earbuds = productImageSearchInputSchema.parse({
+    ...input,
+    name: "HUAWEI FreeBuds SE 3 Beige",
+    brand: "HUAWEI",
+    details: [],
+  });
+  const exact = {
+    ...candidate,
+    matchedModel: "FreeBuds SE 3",
+    matchedName: earbuds.name,
+  };
+  const metadata = (name: string, color: string) =>
+    `<script type="application/ld+json">${JSON.stringify({ "@type": "ProductGroup", hasVariant: [{ "@type": "Product", name, brand: "HUAWEI", color, image: exact.imageUrl }] })}</script>`;
+  expect(
+    (
+      await verifyProductImage(
+        earbuds,
+        exact,
+        [exact.sourceUrl],
+        downloader(metadata("HUAWEI FreeBuds SE 3", "Beige")),
+      )
+    ).json.found,
+  ).toBe(true);
+  expect(
+    (
+      await verifyProductImage(
+        earbuds,
+        exact,
+        [exact.sourceUrl],
+        downloader(metadata("HUAWEI FreeBuds SE 2", "Beige")),
+      )
+    ).json.found,
+  ).toBe(false);
+  const bundle = {
+    ...earbuds,
+    name: "HUAWEI FreeBuds SE 3 Beige BUNDLE",
+    bundle: true,
+  };
+  expect(
+    (
+      await verifyProductImage(
+        bundle,
+        exact,
+        [exact.sourceUrl],
+        downloader(metadata("HUAWEI FreeBuds SE 3", "Beige")),
+      )
+    ).json.found,
+  ).toBe(false);
+});
+test("an inaccessible candidate can fall back to another exact consulted candidate without a second provider call", async () => {
+  const alternative = {
+    ...candidate,
+    sourceUrl: "https://second.example/exact",
+  };
+  const download = downloader();
+  download.mockImplementation(async (url) => {
+    if (url === candidate.sourceUrl) throw new Error("blocked retailer");
+    if (url === alternative.sourceUrl)
+      return {
+        url,
+        bytes: Buffer.from(
+          `<h1>${input.name}</h1><meta property="og:image" content="${candidate.imageUrl}">`,
+        ),
+        mimeType: "text/html",
+      };
+    return { url, bytes: png, mimeType: "image/png" };
+  });
+  expect(
+    (
+      await verifyProductImage(
+        input,
+        { ...candidate, alternatives: [alternative] },
+        [candidate.sourceUrl, alternative.sourceUrl],
+        download,
+      )
+    ).json,
+  ).toMatchObject({ found: true, sourceUrl: alternative.sourceUrl });
 });
 test("a clean no-match response completes without contacting any photo server", async () => {
   const download = downloader();

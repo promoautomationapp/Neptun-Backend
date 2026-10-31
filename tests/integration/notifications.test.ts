@@ -151,7 +151,7 @@ describe("review notifications", () => {
         "SELECT id FROM email_outbox WHERE notification_id IN(SELECT id FROM workspace_notifications WHERE campaign_id=$1)",
         [item.id],
       ),
-    ).toHaveLength(0);
+    ).toHaveLength(3);
   });
 
   test("PM comments notify staff; staff replies notify PM participants and multi-mentions email once each", async () => {
@@ -203,10 +203,10 @@ describe("review notifications", () => {
     });
     expect(await forCampaign("pm", item.id)).toEqual([
       expect.objectContaining({ type: "mention" }),
-    ]);
-    expect(await forCampaign("pm2", item.id)).toEqual([
       expect.objectContaining({ type: "review_reply" }),
     ]);
+    // Explicit mentions target the reply; a colleague is not notified merely by sharing the PM role.
+    expect(await forCampaign("pm2", item.id)).toEqual([]);
     expect(await forCampaign("admin", item.id)).toEqual([
       expect.objectContaining({ type: "mention" }),
     ]);
@@ -218,13 +218,17 @@ describe("review notifications", () => {
       [item.id],
     );
     expect(queued.map((row) => row.recipient).sort()).toEqual(
-      [emails.admin, emails.pm].sort(),
+      [emails.staff, emails.staff2, emails.pm, emails.pm, emails.admin].sort(),
     );
     for (const row of queued) {
       expect(row.encrypted_payload).not.toContain("Fixed");
       expect(decryptEmail(row.encrypted_payload)).toMatchObject({
         kind: "workspace-notification",
-        notification: { message: "Fixed. Please check!", pageIndex: 2 },
+        notification: {
+          pageIndex: 2,
+          action: expect.stringMatching(/comment|reply/),
+          reason: expect.stringMatching(/staff|thread|mentioned/),
+        },
       });
     }
     const actor: Actor = {
@@ -249,7 +253,7 @@ describe("review notifications", () => {
         "SELECT id FROM email_outbox WHERE notification_id IN(SELECT id FROM workspace_notifications WHERE campaign_id=$1)",
         [item.id],
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(5);
   });
 
   test("all mention targets are validated, support is unmentionable even by support, invalid events roll back", async () => {
@@ -542,5 +546,143 @@ describe("review notifications", () => {
     ).notifications.filter((row) => row.campaignId === item.id);
     expect(unread).toHaveLength(1);
     expect(unread[0]!.readAt).toBeNull();
+  });
+  test("a PM comment follows the brochure's staff contributor and resolved/submitted/completed events queue branded context once", async () => {
+    let value = (
+      await agents
+        .staff!.post("/api/team/campaigns")
+        .send({
+          campaign: {
+            id: randomUUID(),
+            name: "Responsible staff",
+            products: [],
+          },
+        })
+        .expect(201)
+    ).body.campaign as Campaign;
+    value = (
+      await agents
+        .pm!.post(`/api/team/campaigns/${value.id}/review`)
+        .send({
+          action: "comment",
+          pageIndex: 0,
+          pageLabel: "Cover",
+          text: "Check this offer",
+          language: "sq",
+          version: value.version,
+        })
+        .expect(201)
+    ).body.campaign;
+    expect(await forCampaign("staff", value.id)).toHaveLength(1);
+    expect(await forCampaign("staff2", value.id)).toHaveLength(0);
+    const thread = value.reviewComments[0]!;
+    value = (
+      await agents
+        .staff!.post(`/api/team/campaigns/${value.id}/review`)
+        .send({
+          action: "fix",
+          commentId: thread.id,
+          language: "sq",
+          version: value.version,
+        })
+        .expect(201)
+    ).body.campaign;
+    value = (
+      await agents
+        .staff!.post(`/api/team/campaigns/${value.id}/review`)
+        .send({ action: "submit", language: "sq", version: value.version })
+        .expect(201)
+    ).body.campaign;
+    value = (
+      await agents
+        .pm!.post(`/api/team/campaigns/${value.id}/review`)
+        .send({ action: "complete", language: "sq", version: value.version })
+        .expect(201)
+    ).body.campaign;
+    expect((await forCampaign("pm", value.id)).map((x) => x.type)).toEqual([
+      "review_submitted",
+      "review_resolved",
+    ]);
+    expect(await forCampaign("pm2", value.id)).toEqual([]);
+    expect((await forCampaign("staff", value.id)).map((x) => x.type)).toEqual([
+      "review_completed",
+      "review_comment",
+    ]);
+    const rows = await db.query<{ encrypted_payload: string }>(
+      "SELECT encrypted_payload FROM email_outbox WHERE notification_id IN(SELECT id FROM workspace_notifications WHERE campaign_id=$1)",
+      [value.id],
+    );
+    expect(rows).toHaveLength(4);
+    const messages = rows.map((row) => decryptEmail(row.encrypted_payload));
+    expect(
+      messages.every((message) => message.notification?.language === "sq"),
+    ).toBe(true);
+    expect(
+      messages.find((message) => message.notification?.action === "comment"),
+    ).toMatchObject({
+      notification: {
+        actorName: "Name pm",
+        reason: "contributor",
+        pageLabel: "Cover",
+      },
+      url: expect.stringContaining(`comment=${thread.id}`),
+    });
+  });
+  test("social annotations produce post links, keep the authenticated actor and avoid duplicate mail on a later save", async () => {
+    let post = (
+      await agents
+        .staff!.post("/api/team/posts")
+        .send({
+          post: { id: randomUUID(), name: "Social review", products: [] },
+        })
+        .expect(201)
+    ).body.post;
+    const thread = {
+      id: randomUUID(),
+      text: "Review social price",
+      authorEmail: "forged@example.test",
+      createdAt: "2000-01-01T00:00:00Z",
+      pageIndex: 0,
+      replies: [],
+      fixed: false,
+    };
+    post = (
+      await agents
+        .pm!.post("/api/team/posts")
+        .send({
+          post: {
+            ...post,
+            notificationLanguage: "sq",
+            reviewComments: [thread],
+          },
+        })
+        .expect(201)
+    ).body.post;
+    expect(post.reviewComments[0].authorEmail).toBe(emails.pm);
+    const rows = await db.query<{ encrypted_payload: string }>(
+      "SELECT encrypted_payload FROM email_outbox WHERE notification_id IN(SELECT id FROM workspace_notifications WHERE post_id=$1)",
+      [post.id],
+    );
+    expect(rows).toHaveLength(1);
+    expect(decryptEmail(rows[0]!.encrypted_payload)).toMatchObject({
+      to: emails.staff,
+      url: expect.stringContaining(`post=${post.id}`),
+      notification: {
+        documentKind: "post",
+        reason: "contributor",
+        action: "comment",
+      },
+    });
+    expect((await forCampaign("staff", post.id))[0]).toMatchObject({
+      documentKind: "post",
+      commentId: thread.id,
+    });
+    await agents.pm!.post("/api/team/posts").send({ post }).expect(201);
+    expect(
+      await db.query(
+        "SELECT id FROM workspace_notifications WHERE post_id=$1",
+        [post.id],
+      ),
+    ).toHaveLength(1);
   });
 });

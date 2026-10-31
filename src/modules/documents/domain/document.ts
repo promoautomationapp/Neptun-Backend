@@ -119,6 +119,10 @@ export const postSchema = z
     version: z.number().int().positive().optional(),
     disabledAt: z.iso.datetime().nullable().optional(),
     disabledBy: z.string().max(320).nullable().optional(),
+    reviewComments: z.array(commentSchema).optional(),
+    reviewHistory: z.array(historySchema).optional(),
+    status: z.enum(statuses).optional(),
+    notificationLanguage: z.enum(["sq", "en"]).optional(),
   })
   .catchall(jsonValue);
 export type Campaign = z.infer<typeof campaignSchema>;

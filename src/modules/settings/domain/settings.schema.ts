@@ -170,6 +170,7 @@ export const brochureDefaultsSchema = z
     showCoverFooter: z.boolean().optional(),
     showCoverLogo: z.boolean().default(true),
     showCoverBand: z.boolean().default(false),
+    coverBandVariant: z.enum(["uuu", "hajde", "online"]).optional(),
     showCoverHeadline: z.boolean().default(false),
     showCoverMessage: z.boolean().default(false),
     showCoverGradient: z.boolean().default(false),
@@ -237,6 +238,7 @@ export const BROCHURE_DESIGN_KEYS = [
   "brochureFooter",
   "showCoverLogo",
   "showCoverBand",
+  "coverBandVariant",
   "showCoverHeadline",
   "showCoverMessage",
   "showCoverGradient",
@@ -455,9 +457,13 @@ export const workspaceSettingsSchema = z
         });
     }
     if (
-      !["neptun-current", "neptun-october"].includes(
-        value.defaultBrochurePresetId,
-      ) &&
+      ![
+        "neptun-current",
+        "neptun-october",
+        "neptun-uuu-gray",
+        "neptun-gradient-all",
+        "neptun-online",
+      ].includes(value.defaultBrochurePresetId) &&
       !value.brochurePresets.some(
         (preset) => preset.id === value.defaultBrochurePresetId,
       )

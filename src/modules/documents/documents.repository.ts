@@ -26,6 +26,7 @@ import { applyReview } from "./domain/review";
 import type { ReviewInput } from "./domain/review";
 import type { JsonObject } from "../../shared/json";
 import { databasePrice } from "../../shared/price";
+import { applyPostReviewChanges } from "./domain/post-review";
 const tables = { campaign: "campaigns", post: "social_posts" } as const;
 @Injectable()
 export class DocumentsRepository {
@@ -103,6 +104,23 @@ export class DocumentsRepository {
           error: "The document version is no longer available.",
           code: "VERSION_CONFLICT",
         });
+      let postEvents: ReturnType<typeof applyPostReviewChanges>["events"] = [];
+      if (kind === "post" && !importing) {
+        const members = (
+          await client.query<{ email: string }>(
+            "SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.status='active' AND m.account_role<>'superadmin' AND u.email_verified_at IS NOT NULL AND (m.account_role='admin' OR m.workspace_access IS NULL OR m.workspace_access->>'mode' IS DISTINCT FROM 'custom' OR coalesce(m.workspace_access->'canViewSocialPosts','true'::jsonb)='true'::jsonb)",
+            [actor.organizationId],
+          )
+        ).rows.map((row) => row.email.toLowerCase());
+        const authorized = applyPostReviewChanges(
+          existing ? postSchema.parse(existing.layout) : undefined,
+          postSchema.parse(document),
+          actor,
+          members,
+        );
+        Object.assign(document, authorized.document);
+        postEvents = authorized.events;
+      }
       if (kind === "campaign") {
         const prior = existing
           ? campaignSchema.parse(existing.layout)
@@ -168,6 +186,14 @@ export class DocumentsRepository {
           client,
           actor.organizationId,
           campaignSchema.parse(document),
+        );
+      for (const event of postEvents)
+        await this.notifications.review(
+          client,
+          actor,
+          event.document,
+          event.input,
+          "post",
         );
       return kind === "campaign"
         ? campaignSchema.parse(document)

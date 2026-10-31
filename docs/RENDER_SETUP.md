@@ -28,7 +28,7 @@ Use **Environment Variables → Add from .env**. A private production file is pr
 
 Production uses `CORS_ORIGIN=https://neptun.promoautomation.app` and `PUBLIC_APP_URL=https://neptun.promoautomation.app`. The frontend Cloudflare Worker uses `API_ORIGIN=https://neptun-backend.onrender.com`. Keep `VITE_API_URL` empty so browser API requests go through the frontend's same-origin `/api/*` proxy. Database, R2 and OpenAI secrets belong only in Render. Keep the local backend `.env` for local development; do not replace it with the production file.
 
-Ensure the local code changes have been committed and pushed by the repository owner before starting Render's deploy. The deploy uses Git, not this machine's uncommitted files.
+Ensure the local code changes have been committed and pushed before starting Render's deploy. The deploy uses Git, not this machine's uncommitted files.
 
 ## Combined API and worker
 
@@ -36,7 +36,7 @@ Ensure the local code changes have been committed and pushed by the repository o
 
 The Render Start Command is `npm run start:combined`, using the supervisor committed in this repository. Keep startup code in the repository so it is reviewed, tested and built with the application. Deploy the matching source before selecting a new package script in Render.
 
-The worker registers `0 3 * * *` in `Europe/Belgrade` in PostgreSQL-backed PgBoss. New catalog runs start only on an explicit refresh click or that daily schedule. Restarting the worker does not create a catch-up refresh. The database allows at most one new daily run per Belgrade calendar date; manual refreshes remain available. Queues handle catalog/category updates, cached media variants, and AI work requested for new content. Run one worker and stop any local production worker before activating the hosted replacement. A separate paid Background Worker is optional, not required for this initial deployment.
+The worker registers `0 3 * * *` in `Europe/Belgrade` in PostgreSQL-backed PgBoss. This daily tick checks eligibility: automatic catalog refreshes run only once per three local calendar days. Failed automatic attempts count toward the interval and successful manual refreshes postpone the next automatic run; manual refresh remains available at any time. Worker startup catches up only when overdue, using the same database lock and interval gate. Queues handle catalog/category updates, cached media variants, and AI work requested for new content. Run one worker and stop any local production worker before activating the hosted replacement. A separate paid Background Worker is optional, not required for this initial deployment.
 
 Catalog runs send heartbeats every 15 seconds. On startup and every 30 seconds, the worker recovers interrupted catalog jobs whose heartbeat is over 90 seconds old. Recovery updates the existing queue job and run atomically, preserves their identities, and leaves healthy runs alone. Three interrupted retries are allowed; repeated interruptions fail visibly and release the active-run constraint so an operator can start a fresh refresh. Completed product updates and media caches survive a restart.
 

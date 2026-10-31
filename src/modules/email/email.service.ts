@@ -17,6 +17,10 @@ import { notificationAudit } from "../notifications/notification-audit";
 import { accountEmail } from "./templates";
 import type { AccountEmail } from "./templates";
 import { AccountEmailTransport, safeEmailFailure } from "./email-transport";
+import {
+  notificationJoins,
+  notificationEligibility,
+} from "../notifications/notification-visibility";
 const encryptionKey = () =>
   createHash("sha256").update(`account-email:${env.SESSION_SECRET}`).digest();
 export function encryptEmail(value: AccountEmail): string {
@@ -141,6 +145,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
               organization_id: string;
               actor_id: string | null;
               actor_role: string;
+              recipient_role?: string;
             }
           | undefined;
         try {
@@ -160,16 +165,21 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
               organization_id: string;
               actor_id: string | null;
               actor_role: string;
+              recipient_role: string;
             }>(
-              `SELECT n.organization_id,n.actor_id,n.actor_role FROM workspace_notifications n
-               JOIN campaigns c ON c.organization_id=n.organization_id AND c.id=n.campaign_id
-               JOIN memberships m ON m.organization_id=n.organization_id AND m.user_id=n.recipient_id
-               JOIN users u ON u.id=m.user_id
-               WHERE n.id=$1 AND c.deleted_at IS NULL AND m.status='active' AND m.account_role<>'superadmin'
-               AND u.email_verified_at IS NOT NULL AND u.email=$2`,
+              `SELECT n.organization_id,n.actor_id,n.actor_role,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END recipient_role FROM workspace_notifications n
+               ${notificationJoins}
+               WHERE n.id=$1 AND ${notificationEligibility} AND u.email=$2`,
               [row.notification_id ?? message.notification?.id, message.to],
             );
-            if (!notification) {
+            const reason = message.notification?.reason;
+            const responsibilityChanged =
+              notification &&
+              ((reason === "reviewer" &&
+                notification.recipient_role !== "pm") ||
+                (["staff", "contributor"].includes(reason || "") &&
+                  notification.recipient_role !== "staff"));
+            if (!notification || responsibilityChanged) {
               await this.db.query(
                 "UPDATE email_outbox SET status='failed',error='Notification recipient or brochure is no longer available.',encrypted_payload='' WHERE id=$1",
                 [row.id],

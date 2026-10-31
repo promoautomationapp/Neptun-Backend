@@ -1,4 +1,6 @@
 import { normalizeAiParams } from "./domain/params";
+import { findExactCatalogPhoto } from "./exact-catalog-photo";
+import { productImageSearchInputSchema, productImageSearchCacheIdentity } from "./domain/product-image-search";
 import {
   Inject,
   Injectable,
@@ -39,6 +41,10 @@ export class AiRepository {
   async enqueue(actor: Actor, request: AiRequest): Promise<AiTicket> {
     const input = normalizeAiParams(request.operation, request.params);
     requireSocialContextAccess(actor, input.context);
+    if (request.operation === "product_image_search") {
+      const existingPhoto = await findExactCatalogPhoto(this.db, actor, input);
+      if (existingPhoto) return existingPhoto;
+    }
     const params = [
       "proofread",
       "text_generate",
@@ -108,7 +114,7 @@ export class AiRepository {
       organizationId: actor.organizationId,
       operation: request.operation,
       sourceSha256,
-      params: normalized,
+      params: request.operation === "product_image_search" ? productImageSearchCacheIdentity(productImageSearchInputSchema.parse(normalized)) : normalized,
       model,
       quality,
       promptVersion: version,

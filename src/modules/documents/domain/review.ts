@@ -15,6 +15,7 @@ export const reviewInput = z.object({
   mention: z.string().max(320).optional(),
   mentions: z.array(z.string().max(320)).max(20).optional(),
   version: z.number().int().positive().optional(),
+  language: z.enum(["sq", "en"]).optional(),
 });
 export type ReviewInput = z.infer<typeof reviewInput>;
 export function reviewMentions(input: ReviewInput): string[] {

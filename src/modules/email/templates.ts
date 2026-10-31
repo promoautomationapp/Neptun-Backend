@@ -18,6 +18,12 @@ export interface AccountEmail {
     actorName: string;
     message: string;
     pageIndex: number | null;
+    action?: "comment" | "reply" | "fix" | "submit" | "complete" | "reopen";
+    reason?: "mentioned" | "thread" | "contributor" | "reviewer" | "staff";
+    pageLabel?: string;
+    occurredAt?: string;
+    documentKind?: "campaign" | "post";
+    language?: "sq" | "en";
   };
 }
 export const escapeHtml = (value: string) =>
@@ -142,30 +148,93 @@ function notificationEmail(message: AccountEmail): {
 } {
   const notice = message.notification;
   if (!notice) throw new Error("Notification email metadata is required.");
+  const sq = notice.language === "sq";
+  const text = (en: string, al: string) => (sq ? al : en);
   const brand = env.MAIL_BRAND_NAME;
-  const title = `${notice.actorName} mentioned you`;
-  const campaign = notice.campaignName;
-  const page =
-    notice.pageIndex === null ? "" : ` · Page ${notice.pageIndex + 1}`;
+  const actions = {
+    comment: text("added a comment", "shtoi një koment"),
+    reply: text("replied to a comment", "iu përgjigj një komenti"),
+    fix: text("resolved a comment", "shënoi një koment si të zgjidhur"),
+    submit: text(
+      "sent the brochure for review",
+      "dërgoi broshurën për shqyrtim",
+    ),
+    complete: text("marked the brochure as complete", "shënoi broshurën si të përfunduar"),
+    reopen: text("reopened the brochure", "rihapi broshurën"),
+  };
+  // Older queued mention messages remain readable after deployment.
+  const title = notice.action
+    ? `${notice.actorName} ${actions[notice.action]}`
+    : `${notice.actorName} ${text("mentioned you", "ju përmendi")}`;
+  const documentName = notice.campaignName;
+  const location =
+    notice.documentKind === "post"
+      ? text("Social post", "Postim social")
+      : notice.pageLabel ||
+        (notice.pageIndex === null
+          ? ""
+          : `${text("Page", "Faqja")} ${notice.pageIndex + 1}`);
+  const time =
+    notice.occurredAt && Number.isFinite(Date.parse(notice.occurredAt))
+      ? new Intl.DateTimeFormat(sq ? "sq-AL" : "en-GB", {
+          dateStyle: "medium",
+          timeStyle: "short",
+          timeZone: "Europe/Belgrade",
+        }).format(new Date(notice.occurredAt))
+      : "";
+  const reasons = {
+    mentioned: text(
+      "You received this update because you were mentioned in this conversation.",
+      "E morët këtë njoftim sepse ju përmendën në këtë bisedë.",
+    ),
+    thread: text(
+      "You received this update because you took part in this conversation.",
+      "E morët këtë njoftim sepse keni marrë pjesë në këtë bisedë.",
+    ),
+    contributor: text(
+      "You received this update because you worked on this document.",
+      "E morët këtë njoftim sepse keni punuar në këtë dokument.",
+    ),
+    reviewer: text(
+      "You received this update because this work needs your review.",
+      "E morët këtë njoftim sepse kjo punë ka nevojë për shqyrtimin tuaj.",
+    ),
+    staff: text(
+      "You received this update because your staff team is responsible for this work.",
+      "E morët këtë njoftim sepse ekipi juaj është përgjegjës për këtë punë.",
+    ),
+  };
+  const reason = reasons[notice.reason ?? "mentioned"];
   const url = webUrl(message.url);
-  const greeting = message.name ? `Hello ${message.name},` : "Hello,";
+  const greeting = message.name
+    ? `${text("Hello", "Përshëndetje")} ${message.name},`
+    : text("Hello,", "Përshëndetje,");
+  const cta =
+    notice.action && ["submit", "complete", "reopen"].includes(notice.action)
+      ? text("Open brochure", "Hap broshurën")
+      : text("View comment", "Shiko komentin");
   const action = url
-    ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0"><tr><td bgcolor="#ef4023" style="border-radius:8px"><a href="${escapeHtml(url)}" style="display:inline-block;padding:14px 22px;font-size:16px;line-height:22px;color:#ffffff;font-weight:700;text-decoration:none">View comment</a></td></tr></table><p style="font-size:12px;line-height:19px;color:#64748b;word-break:break-all">Or open <a href="${escapeHtml(url)}" style="color:#1d5b91">${escapeHtml(url)}</a></p>`
+    ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:24px 0"><tr><td bgcolor="#ef4023" style="border-radius:8px"><a href="${escapeHtml(url)}" style="display:inline-block;padding:14px 22px;font-size:16px;line-height:22px;color:#ffffff;font-weight:700;text-decoration:none">${escapeHtml(cta)}</a></td></tr></table><p style="font-size:12px;line-height:19px;color:#64748b;word-break:break-all">${text("Or open", "Ose hapni")} <a href="${escapeHtml(url)}" style="color:#1d5b91">${escapeHtml(url)}</a></p>`
     : "";
   const logoUrl = webUrl(env.MAIL_LOGO_URL);
   const logo = logoUrl?.startsWith("https:")
     ? `<img src="${escapeHtml(logoUrl)}" width="160" alt="${escapeHtml(brand)}" style="display:block;max-width:160px;height:auto;border:0"/>`
     : `<span style="font-size:22px;font-weight:700;color:#ffffff">${escapeHtml(brand)}</span>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="x-apple-disable-message-reformatting"/><title>${escapeHtml(title)}</title><style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}table,td{mso-table-lspace:0pt;mso-table-rspace:0pt}@media screen and (max-width:480px){.email-outer{padding:20px 12px!important}.email-content{padding:24px!important}.email-title{font-size:23px!important;line-height:30px!important}}</style></head><body style="margin:0;padding:0;background:#f2f5fa;color:#18324f;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all">A new mention in ${escapeHtml(campaign)}.</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f2f5fa"><tr><td class="email-outer" align="center" style="padding:36px 16px"><!--[if mso]><table role="presentation" width="600"><tr><td><![endif]--><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="max-width:600px;border:1px solid #dce5ef;border-radius:14px;overflow:hidden"><tr><td bgcolor="#12365d" style="padding:26px 32px;border-bottom:5px solid #ef4023">${logo}</td></tr><tr><td class="email-content" style="padding:32px"><p style="margin:0 0 12px;font-size:11px;font-weight:700;letter-spacing:1px;color:#c6321b">BROCHURE REVIEW</p><h1 class="email-title" style="margin:0 0 22px;font-size:26px;line-height:34px">${escapeHtml(title)}</h1><p style="font-size:16px;line-height:24px">${escapeHtml(greeting)}</p><p style="font-size:15px;line-height:24px;color:#425c76">${escapeHtml(campaign)}${escapeHtml(page)}</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:20px 0"><tr><td bgcolor="#edf5fc" style="padding:20px;border-left:3px solid #1d5b91;border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-size:15px;line-height:25px">${escapeHtml(notice.message)}</td></tr></table>${action}<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;line-height:19px;color:#64748b">You received this workspace notification because a colleague mentioned you in a brochure review. Sign in to view or reply.</p></td></tr></table><!--[if mso]></td></tr></table><![endif]--><p style="font-size:12px;line-height:19px;color:#64748b">${escapeHtml(brand)} · Your team workspace</p></td></tr></table></body></html>`;
+  const context = [documentName, location, time].filter(Boolean).join(" · ");
+  const excerpt = notice.message
+    ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:20px 0"><tr><td bgcolor="#edf5fc" style="padding:20px;border-left:3px solid #1d5b91;border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-size:15px;line-height:25px">${escapeHtml(notice.message)}</td></tr></table>`
+    : "";
+  const html = `<!doctype html><html lang="${sq ? "sq" : "en"}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="x-apple-disable-message-reformatting"/><title>${escapeHtml(title)}</title><style>body,table,td,a{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}table,td{mso-table-lspace:0pt;mso-table-rspace:0pt}@media screen and (max-width:480px){.email-outer{padding:20px 12px!important}.email-content{padding:24px!important}.email-title{font-size:23px!important;line-height:30px!important}}</style></head><body style="margin:0;padding:0;background:#f2f5fa;color:#18324f;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all">${escapeHtml(title)} · ${escapeHtml(documentName)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f2f5fa"><tr><td class="email-outer" align="center" style="padding:36px 16px"><!--[if mso]><table role="presentation" width="600"><tr><td><![endif]--><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="max-width:600px;border:1px solid #dce5ef;border-radius:14px;overflow:hidden"><tr><td bgcolor="#12365d" style="padding:26px 32px;border-bottom:5px solid #ef4023">${logo}</td></tr><tr><td class="email-content" style="padding:32px"><p style="margin:0 0 12px;font-size:11px;font-weight:700;letter-spacing:1px;color:#c6321b">${text("TEAM UPDATE", "NJOFTIM NGA EKIPI")}</p><h1 class="email-title" style="margin:0 0 22px;font-size:26px;line-height:34px">${escapeHtml(title)}</h1><p style="font-size:16px;line-height:24px">${escapeHtml(greeting)}</p><p style="font-size:15px;line-height:24px;color:#425c76">${escapeHtml(context)}</p>${excerpt}${action}<p style="margin:28px 0 0;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;line-height:19px;color:#64748b">${escapeHtml(reason)} ${text("Sign in to view the work or reply.", "Hyni në llogari për të parë punën ose për t’u përgjigjur.")}</p></td></tr></table><!--[if mso]></td></tr></table><![endif]--><p style="font-size:12px;line-height:19px;color:#64748b">${escapeHtml(brand)} · ${text("Your team workspace", "Hapësira e punës së ekipit tuaj")}</p></td></tr></table></body></html>`;
   return {
-    subject: `${title} · ${campaign}`.replace(/[\r\n]+/g, " "),
+    subject: `${title} · ${documentName}`.replace(/[\r\n]+/g, " "),
     html,
     text: [
       greeting,
       title,
-      `${campaign}${page}`,
+      context,
       notice.message,
-      url ? `View comment: ${url}` : "",
+      reason,
+      url ? `${cta}: ${url}` : "",
       brand,
     ]
       .filter(Boolean)

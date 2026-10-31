@@ -3,24 +3,28 @@ import type { PoolClient } from "pg";
 import { Database } from "../../database/database";
 import { env } from "../../config/environment";
 import type { Actor } from "../auth/domain/actor";
-import type { Campaign } from "../documents/domain/document";
+import type { Campaign, DocumentKind } from "../documents/domain/document";
+import { resolvedWorkspaceAccess } from "../auth/domain/workspace-access";
 import { reviewMentions } from "../documents/domain/review";
 import type { ReviewInput } from "../documents/domain/review";
 import { EmailService } from "../email/email.service";
 import { notificationAudit } from "./notification-audit";
+import {
+  notificationJoins,
+  notificationEligibility,
+} from "./notification-visibility";
+import {
+  selectNotificationRecipients,
+  type NotificationMember,
+  type NotificationType,
+} from "./notification-recipients";
 
-export type NotificationType =
-  "review_submitted" | "mention" | "review_comment" | "review_reply";
-interface Member {
-  id: string;
-  name: string;
-  email: string;
-  role: "pm" | "staff" | "admin";
-}
+export type { NotificationType } from "./notification-recipients";
 interface NotificationRow {
   id: string;
   type: NotificationType;
-  campaign_id: string;
+  campaign_id: string | null;
+  post_id: string | null;
   campaign_name: string;
   page_index: number | null;
   comment_id: string | null;
@@ -30,8 +34,7 @@ interface NotificationRow {
   created_at: Date;
   read_at: Date | null;
 }
-const visible = `n.organization_id=$1 AND n.recipient_id=$2 AND c.deleted_at IS NULL
-  AND m.status='active' AND m.account_role<>'superadmin' AND u.email_verified_at IS NOT NULL`;
+const visible = `n.organization_id=$1 AND n.recipient_id=$2 AND ${notificationEligibility}`;
 
 @Injectable()
 export class NotificationsRepository {
@@ -48,9 +51,7 @@ export class NotificationsRepository {
     }>(
       `WITH visible AS (
          SELECT n.* FROM workspace_notifications n
-         JOIN campaigns c ON c.organization_id=n.organization_id AND c.id=n.campaign_id
-         JOIN memberships m ON m.organization_id=n.organization_id AND m.user_id=n.recipient_id
-         JOIN users u ON u.id=m.user_id WHERE ${visible}
+         ${notificationJoins} WHERE ${visible}
        ), latest AS (SELECT * FROM visible WHERE ($3=false OR read_at IS NULL) ORDER BY created_at DESC,id DESC LIMIT 50)
        SELECT coalesce((SELECT json_agg(latest ORDER BY created_at DESC,id DESC) FROM latest),'[]'::json) notifications,
          (SELECT count(*)::int FROM visible WHERE read_at IS NULL) unread_count`,
@@ -60,7 +61,8 @@ export class NotificationsRepository {
       notifications: (result?.notifications ?? []).map((row) => ({
         id: row.id,
         type: row.type,
-        campaignId: row.campaign_id,
+        campaignId: row.campaign_id ?? row.post_id,
+        documentKind: row.post_id ? "post" : "campaign",
         campaignName: row.campaign_name,
         pageIndex: row.page_index,
         commentId: row.comment_id,
@@ -83,9 +85,7 @@ export class NotificationsRepository {
       const rows = (
         await client.query<{ id: string; read_at: Date | null }>(
           `SELECT n.id,n.read_at FROM workspace_notifications n
-         JOIN campaigns c ON c.organization_id=n.organization_id AND c.id=n.campaign_id
-         JOIN memberships m ON m.organization_id=n.organization_id AND m.user_id=n.recipient_id
-         JOIN users u ON u.id=m.user_id WHERE ${visible} AND ($3::uuid IS NULL OR n.id=$3) FOR UPDATE OF n`,
+         ${notificationJoins} WHERE ${visible} AND ($3::uuid IS NULL OR n.id=$3) FOR UPDATE OF n`,
           [actor.organizationId, actor.userId, id],
         )
       ).rows;
@@ -116,34 +116,28 @@ export class NotificationsRepository {
     actor: Actor,
     campaign: Campaign,
     input: ReviewInput,
+    kind: DocumentKind = "campaign",
   ): Promise<void> {
-    if (!["submit", "comment", "reply"].includes(input.action)) return;
     const event = campaign.reviewHistory.at(-1);
     if (!event) return;
     const members = (
-      await client.query<Member>(
-        `SELECT u.id,u.name,u.email,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END role
+      await client.query<
+        NotificationMember & {
+          account_role: "staff" | "pm" | "admin";
+          workspace_access: unknown;
+        }
+      >(
+        `SELECT u.id,u.name,u.email,m.account_role,m.workspace_access,CASE WHEN m.account_role='staff' AND m.review_role='pm' THEN 'pm' ELSE m.account_role END role
        FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.status='active'
        AND m.account_role<>'superadmin' AND u.email_verified_at IS NOT NULL`,
         [actor.organizationId],
       )
-    ).rows;
-    const byEmail = new Map(
-      members.map((member) => [member.email.toLowerCase(), member]),
+    ).rows.filter(
+      (member) =>
+        kind !== "post" ||
+        resolvedWorkspaceAccess(member.account_role, member.workspace_access)
+          .canViewSocialPosts,
     );
-    const recipients = new Map<
-      string,
-      { member: Member; type: NotificationType; email: boolean }
-    >();
-    const add = (member: Member, type: NotificationType, email = false) => {
-      if (member.id === actor.userId) return;
-      const prior = recipients.get(member.id);
-      recipients.set(member.id, {
-        member,
-        type: email ? "mention" : (prior?.type ?? type),
-        email: email || prior?.email || false,
-      });
-    };
     const comment = event.commentId
       ? campaign.reviewComments.find((item) => item.id === event.commentId)
       : undefined;
@@ -152,31 +146,40 @@ export class NotificationsRepository {
       actor.accountRole === "staff" && actor.reviewRole === "pm"
         ? "pm"
         : (actor.accountRole ?? actor.reviewRole);
-    if (input.action === "submit")
-      members
-        .filter((member) => member.role === "pm")
-        .forEach((member) => add(member, "review_submitted"));
-    else if (
-      input.action === "comment" &&
-      actorRole === "pm" &&
-      !reviewMentions(input).length
-    )
-      members
-        .filter((member) => member.role === "staff")
-        .forEach((member) => add(member, "review_comment"));
-    else if (input.action === "reply" && actorRole === "staff" && comment) {
-      for (const participant of [comment, ...comment.replies]) {
-        const member = byEmail.get(participant.authorEmail.toLowerCase());
-        if (member?.role === "pm") add(member, "review_reply");
-      }
-    }
-    // Mentions are a comment/reply action; submission payload extras must not send mail.
-    for (const mention of input.action === "submit"
-      ? []
-      : reviewMentions(input)) {
-      const mentioned = byEmail.get(mention);
-      if (mentioned) add(mentioned, "mention", true);
-    }
+    const versions = (
+      await client.query<{ email: string | null }>(
+        "SELECT snapshot->>'updatedBy' email FROM document_versions WHERE organization_id=$1 AND kind=$2 AND document_id=$3 ORDER BY version DESC LIMIT 30",
+        [actor.organizationId, kind, campaign.id],
+      )
+    ).rows;
+    const collaborators = [
+      String(campaign.updatedBy || ""),
+      ...versions.map((row) => row.email || ""),
+      ...campaign.reviewHistory.map((row) => row.actor),
+    ];
+    const reviewers = campaign.reviewComments.flatMap((thread) => [
+      thread.authorEmail,
+      ...thread.replies.map((reply) => reply.authorEmail),
+    ]);
+    const threadEmails = comment
+      ? [
+          comment.authorEmail,
+          ...(comment.mentions || []),
+          ...comment.replies.flatMap((reply) => [
+            reply.authorEmail,
+            ...(reply.mentions || []),
+          ]),
+        ]
+      : [];
+    const recipients = selectNotificationRecipients(members, {
+      actorId: actor.userId,
+      actorRole,
+      action: input.action,
+      mentions: reviewMentions(input),
+      collaboratorEmails: collaborators,
+      reviewerEmails: reviewers,
+      threadEmails,
+    });
     const actorName =
       actor.accountRole === "superadmin"
         ? "Workspace team"
@@ -199,22 +202,41 @@ export class NotificationsRepository {
           ),
         text,
       );
-    const message =
-      input.action === "submit"
-        ? "A brochure is ready for your review."
-        : redact(entry?.text ?? "");
-    for (const { member, type, email } of recipients.values()) {
+    const workflowMessages = {
+      submit:
+        input.language === "en"
+          ? "Ready for your review."
+          : "Gati për shqyrtimin tuaj.",
+      fix:
+        input.language === "en"
+          ? "The comment was marked as resolved."
+          : "Komenti u shënua si i zgjidhur.",
+      complete:
+        input.language === "en"
+          ? "The work was marked as completed."
+          : "Puna u shënua si e përfunduar.",
+      reopen:
+        input.language === "en"
+          ? "The work was reopened for editing."
+          : "Puna u rihap për redaktim.",
+    };
+    const message = redact(
+      input.action === "comment" || input.action === "reply"
+        ? (entry?.text ?? "")
+        : workflowMessages[input.action],
+    );
+    for (const { member, type, reason } of recipients) {
       const [notification] = (
         await client.query<{ id: string }>(
-          `INSERT INTO workspace_notifications(organization_id,recipient_id,event_id,type,campaign_id,campaign_name,page_index,comment_id,actor_id,actor_role,actor_name,actor_email,message)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          `INSERT INTO workspace_notifications(organization_id,recipient_id,event_id,type,campaign_id,campaign_name,page_index,comment_id,actor_id,actor_role,actor_name,actor_email,message,post_id)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          ON CONFLICT(organization_id,event_id,recipient_id) DO NOTHING RETURNING id`,
           [
             actor.organizationId,
             member.id,
             event.id,
             type,
-            campaign.id,
+            kind === "campaign" ? campaign.id : null,
             redact(campaign.name),
             comment?.pageIndex ?? null,
             comment?.id ?? null,
@@ -223,6 +245,7 @@ export class NotificationsRepository {
             actorName,
             actorEmail,
             message,
+            kind === "post" ? campaign.id : null,
           ],
         )
       ).rows;
@@ -235,9 +258,12 @@ export class NotificationsRepository {
         notificationId: notification.id,
         eventKey: `notification:${notification.id}:created`,
       });
-      if (email) {
+      {
         const url = new URL(env.PUBLIC_APP_URL);
-        url.searchParams.set("campaign", campaign.id);
+        url.searchParams.set(
+          kind === "post" ? "post" : "campaign",
+          campaign.id,
+        );
         if (comment) {
           url.searchParams.set("page", String(comment.pageIndex));
           url.searchParams.set("comment", comment.id);
@@ -253,6 +279,12 @@ export class NotificationsRepository {
             actorName,
             message,
             pageIndex: comment?.pageIndex ?? null,
+            action: input.action,
+            reason,
+            pageLabel: comment?.pageLabel || input.pageLabel,
+            occurredAt: event.at,
+            documentKind: kind,
+            language: input.language ?? "sq",
           },
         });
       }

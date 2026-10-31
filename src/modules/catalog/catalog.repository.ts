@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { Database } from "../../database/database";
 import { normalizeHierarchy, type SourceProduct } from "./neptun-source";
 import type { JsonObject } from "../../shared/json";
+import {
+  automaticCatalogRefreshDue,
+  CATALOG_AUTOMATIC_INTERVAL_DAYS,
+} from "./catalog-schedule";
 
 export interface CatalogStatus {
   status: "idle" | "queued" | "running" | "completed" | "failed";
@@ -20,6 +24,7 @@ export interface CatalogStatus {
   phase: string;
   error: string | null;
   daily: boolean;
+  automaticIntervalDays: number;
   imagesPending: number;
   revision: string | null;
 }
@@ -73,7 +78,8 @@ export class CatalogRepository {
       failedProducts: row?.failed_products ?? 0,
       phase: row?.phase ?? "idle",
       error: row?.error ?? null,
-      daily: true,
+      daily: false,
+      automaticIntervalDays: CATALOG_AUTOMATIC_INTERVAL_DAYS,
       imagesPending: Number(media[0]?.pending ?? 0),
       revision: media[0]?.revision?.toISOString() ?? null,
     };
@@ -101,18 +107,30 @@ export class CatalogRepository {
         ).rows.length
       )
         return;
-      // Scheduled delivery/restarts must not create a second daily crawl.
-      // Manual refreshes remain available even after today's scheduled run.
-      if (
-        trigger === "daily" &&
-        (
-          await client.query(
-            "SELECT id FROM catalog_sync_runs WHERE organization_id=$1 AND trigger='daily' AND (created_at AT TIME ZONE 'Europe/Belgrade')::date=(now() AT TIME ZONE 'Europe/Belgrade')::date LIMIT 1",
+      // Keep the legacy 'daily' trigger/queue name, but gate real crawls from
+      // durable run history. Failed automatic attempts count toward the three
+      // local-day interval; a successful manual refresh also keeps data fresh.
+      // Manual requests always bypass this automatic cost-control gate.
+      if (trigger === "daily") {
+        const recent = (
+          await client.query<{
+            automatic_at: Date | null;
+            manual_at: Date | null;
+            current_time: Date;
+          }>(
+            "SELECT max(created_at) FILTER (WHERE trigger='daily') automatic_at,max(completed_at) FILTER (WHERE trigger='manual' AND status='completed') manual_at,now() current_time FROM catalog_sync_runs WHERE organization_id=$1",
             [organizationId],
           )
-        ).rows.length
-      )
-        return;
+        ).rows[0]!;
+        if (
+          !automaticCatalogRefreshDue(
+            recent.automatic_at,
+            recent.manual_at,
+            recent.current_time,
+          )
+        )
+          return;
+      }
       const run = (
         await client.query<{ id: string }>(
           "INSERT INTO catalog_sync_runs(organization_id,trigger,created_by) VALUES($1,$2,$3) RETURNING id",

@@ -140,7 +140,7 @@ describe("durable incremental catalog refresh", () => {
       paths: ["IT > AKSESORË > Mouse > Mouse Pad"],
     });
   });
-  test("allows one scheduled run per Belgrade day while manual refresh stays available", async () => {
+  test("allows automatic attempts every three Belgrade days while manual refresh stays available", async () => {
     const dailyOrg = (
       await db.query<{ id: string }>(
         "INSERT INTO organizations(name,slug) VALUES('Daily schedule test',$1) RETURNING id",
@@ -149,7 +149,7 @@ describe("durable incremental catalog refresh", () => {
     )[0]!.id;
     const first = await repository.enqueue(dailyOrg, "daily");
     await db.query(
-      "UPDATE catalog_sync_runs SET status='completed',completed_at=now() WHERE id=$1",
+      "UPDATE catalog_sync_runs SET status='failed',completed_at=now() WHERE id=$1",
       [first.runId],
     );
     const repeated = await Promise.all([
@@ -164,11 +164,18 @@ describe("durable incremental catalog refresh", () => {
       [manual.runId],
     );
     await db.query(
-      "UPDATE catalog_sync_runs SET created_at=created_at-interval '1 day' WHERE id=$1",
+      "UPDATE catalog_sync_runs SET created_at=now()-interval '2 days' WHERE id=$1",
       [first.runId],
     );
-    const tomorrow = await repository.enqueue(dailyOrg, "daily");
-    expect(tomorrow.runId).not.toBe(first.runId);
+    expect((await repository.enqueue(dailyOrg, "daily")).runId).toBe(
+      manual.runId,
+    );
+    await db.query(
+      "UPDATE catalog_sync_runs SET created_at=now()-interval '3 days',completed_at=now()-interval '3 days' WHERE id=ANY($1::uuid[])",
+      [[first.runId, manual.runId]],
+    );
+    const nextAutomatic = await repository.enqueue(dailyOrg, "daily");
+    expect(nextAutomatic.runId).not.toBe(first.runId);
     expect(
       (
         await db.query<{ count: string }>(

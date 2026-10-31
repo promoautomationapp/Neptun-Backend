@@ -5,6 +5,7 @@ import {
   productIdentityText,
   productImageCandidateSchema,
   namedProductFamily,
+  productPageIdentityMatches,
 } from "../../modules/ai/domain/product-image-search";
 import type { ProductImageSearchInput } from "../../modules/ai/domain/product-image-search";
 import type { JsonObject } from "../../shared/json";
@@ -34,26 +35,7 @@ function identityMatches(
   input: ProductImageSearchInput,
   model: string,
 ): boolean {
-  if (
-    !hasExactModelIdentifier(text, model) ||
-    (input.brand &&
-      !productIdentityText(text).includes(productIdentityText(input.brand)))
-  )
-    return false;
-  const family = namedProductFamily(input.name);
-  if (family && !hasExactModelIdentifier(text, family)) return false;
-  const capacities = [
-    ...[input.name, ...input.details]
-      .join(" ")
-      .matchAll(/\b\d+\s*(?:gb|tb)\b/gi),
-  ].map((match) => match[0]);
-  const colors =
-    input.name.match(
-      /\b(?:black|white|silver|gold|orange|blue|green|purple|pink|red|graphite|natural titanium|blu|zi|zezë|bardhë)\b/gi,
-    ) ?? [];
-  return [...capacities, ...colors].every((variant) =>
-    hasExactModelIdentifier(text, variant),
-  );
+  return productPageIdentityMatches(text, input, model);
 }
 function productMainImages(
   html: string,
@@ -73,6 +55,49 @@ function productMainImages(
         if (attrs.src || attrs.content)
           images.push(attrs.src ?? attrs.content ?? "");
       }
+    }
+  }
+  // Official product galleries often use a family heading and a separate,
+  // explicitly labelled image per color. Bind that label to this exact image;
+  // merely finding the requested color somewhere in the page is insufficient.
+  const baseInput = {
+    ...input,
+    name: input.name.replace(
+      /\b(?:black|white|beige|bej|silver|gold|orange|blue|green|purple|pink|red|graphite|natural titanium|blu|zi|zezë|bardhë)\b/gi,
+      "",
+    ),
+    variants: [],
+    details: [],
+  };
+  const familyHeadings = headings.filter((heading) =>
+    identityMatches(heading, baseInput, model),
+  );
+  if (familyHeadings.length) {
+    for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
+      const attrs = attributes(tag);
+      const alt = attrs.alt || attrs.title || "";
+      if (
+        !alt ||
+        /\b(?:banner|lifestyle|comparison|compare|two colors|two colours|all colors|all colours|wearing|selling points|swatch)\b/i.test(
+          alt,
+        )
+      )
+        continue;
+      const altFamily = namedProductFamily(alt);
+      if (
+        altFamily &&
+        !hasExactModelIdentifier(altFamily, model) &&
+        !hasExactModelIdentifier(model, altFamily)
+      )
+        continue;
+      if (!identityMatches(alt, input, model)) continue;
+      for (const key of ["src", "data-src", "data-original", "data-lazy-src"])
+        if (attrs[key]) images.push(attrs[key]!);
+      for (const key of ["srcset", "data-srcset"])
+        for (const source of (attrs[key] || "").split(",")) {
+          const url = source.trim().split(/\s+/)[0];
+          if (url) images.push(url);
+        }
     }
   }
   // Product JSON-LD binds a declared photograph to its own exact identity,
@@ -105,7 +130,16 @@ function productMainImages(
             )
           : [],
       );
-      const text = [item.name, item.model, item.sku, brand, ...extraFacts]
+      const text = [
+        item.name,
+        item.model,
+        item.mpn,
+        item.sku,
+        item.productID,
+        item.color,
+        brand,
+        ...extraFacts,
+      ]
         .filter((part) => typeof part === "string")
         .join(" ");
       if (identityMatches(text, input, model)) {
@@ -142,7 +176,7 @@ function productMainImages(
 }
 /** The source page must be one consulted by web search, identify the supplied
  * exact model, and actually reference the selected photograph. */
-export async function verifyProductImage(
+async function verifyCandidate(
   input: ProductImageSearchInput,
   output: unknown,
   consultedUrls: string[],
@@ -166,6 +200,14 @@ export async function verifyProductImage(
   try {
     const sourceUrl = publicHttpsUrl(candidate.sourceUrl).href;
     const imageUrl = publicHttpsUrl(candidate.imageUrl).href;
+    if (
+      /(?:[-_/](?:thumb(?:nail)?|blur|swatch)(?:[-_./]|$)|\/(?:icons?|swatches)\/)/i.test(
+        new URL(imageUrl).pathname,
+      )
+    )
+      return missing(
+        "Only a thumbnail or color selector was found. Upload an original product photo.",
+      );
     if (
       !consultedUrls.some((url) => {
         try {
@@ -232,4 +274,34 @@ export async function verifyProductImage(
       "The exact photo could not be safely downloaded. Upload your own image.",
     );
   }
+}
+
+/** Try a bounded set of exact candidates from the same consulted search. A
+ * blocked retailer or thumbnail must not discard another verifiable source. */
+export async function verifyProductImage(
+  input: ProductImageSearchInput,
+  output: unknown,
+  consultedUrls: string[],
+  download: typeof downloadPublic = downloadPublic,
+) {
+  const alternatives =
+    output &&
+    typeof output === "object" &&
+    "alternatives" in output &&
+    Array.isArray(output.alternatives)
+      ? output.alternatives.slice(0, 2)
+      : [];
+  let last = await verifyCandidate(input, output, consultedUrls, download);
+  if (last.json.found) return last;
+  for (const candidate of alternatives) {
+    const next = await verifyCandidate(
+      input,
+      candidate,
+      consultedUrls,
+      download,
+    );
+    if (next.json.found) return next;
+    last = next;
+  }
+  return last;
 }

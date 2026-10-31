@@ -8,6 +8,7 @@ import { CatalogRepository } from "./catalog.repository";
 import {
   discoverCategories,
   normalizeProductCode,
+  listingProductKey,
   discoverBrands,
   embeddedModel,
   productModel,
@@ -65,7 +66,7 @@ export async function processCatalogRefresh(
         let read = 0;
         let pages = 1;
         const pageSignatures = new Set<string>();
-        const listingCodes = new Set<string>();
+        const listingProducts = new Set<string>();
         do {
           const url = new URL(listing.url);
           url.searchParams.set("items", "100");
@@ -87,9 +88,7 @@ export async function processCatalogRefresh(
             listing.parentId = Number(model.ParentId) || 0;
             if (listing.id) categories.set(listing.id, listing);
           }
-          const signature = items
-            .map((item: SiteObject) => String(item.CodeNumber))
-            .join("|");
+          const signature = items.map(listingProductKey).join("|");
           if (items.length && pageSignatures.has(signature))
             throw new Error(
               "Neptun repeated a listing page; catalog completeness cannot be confirmed.",
@@ -99,14 +98,14 @@ export async function processCatalogRefresh(
             const code = normalizeProductCode(item.CodeNumber);
             if (!code)
               throw new Error("A listing product has no product code.");
-            listingCodes.add(code);
+            listingProducts.add(listingProductKey(item));
             const previous = collected.get(code);
             if (!previous || listing.path.length > previous.path.length)
               collected.set(code, { model: item, path: listing.path });
           }
-          // Do not count overlapping website pages as additional products.
-          // Pagination completes only after every unique category code is seen.
-          read = listingCodes.size;
+          // Distinct website IDs may share a SKU (for example a toaster and a
+          // bundle). Count those entries, but never recount overlapping pages.
+          read = listingProducts.size;
           pages = Math.max(1, Math.ceil(expected / (items.length || 100)));
           if (!items.length && read < expected)
             throw new Error(

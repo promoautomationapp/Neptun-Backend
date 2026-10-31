@@ -5,6 +5,10 @@ import {
 } from "./modules/catalog/catalog.processor";
 import { processCatalogBrandImage } from "./modules/catalog/catalog-brands";
 import { CatalogRepository } from "./modules/catalog/catalog.repository";
+import {
+  catalogAutomaticWindowOpen,
+  CATALOG_TIME_ZONE,
+} from "./modules/catalog/catalog-schedule";
 import { directConnection } from "./database/direct-connection";
 import { OpenAiProvider } from "./worker/ai/provider";
 import { processAiJob } from "./worker/ai/processor";
@@ -57,18 +61,22 @@ async function main(): Promise<void> {
   });
   await boss.createQueue("catalog-daily");
   const catalog = new CatalogRepository(db);
-  await boss.work("catalog-daily", async () => {
+  const enqueueAutomaticCatalog = async () => {
     for (const organization of await db.query<{ id: string }>(
       "SELECT id FROM organizations WHERE slug='neptun'",
     ))
       await catalog.enqueue(organization.id, "daily");
-  });
+  };
+  await boss.work("catalog-daily", enqueueAutomaticCatalog);
+  // A small daily tick checks durable history; only every third local day
+  // starts the expensive crawl. */3 in cron would reset at month boundaries.
   await boss.schedule(
     "catalog-daily",
     "0 3 * * *",
     {},
-    { tz: "Europe/Belgrade" },
+    { tz: CATALOG_TIME_ZONE },
   );
+  if (catalogAutomaticWindowOpen()) await enqueueAutomaticCatalog();
   await boss.work<{ organizationId: string; runId: string }>(
     "catalog-refresh",
     { batchSize: 1 },

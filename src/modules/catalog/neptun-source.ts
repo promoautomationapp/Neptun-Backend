@@ -4,6 +4,14 @@ export const NEPTUN_ORIGIN = "https://www.neptun-ks.com";
 export function normalizeProductCode(value: unknown): string {
   return text(value);
 }
+/** Website totals count listings, including bundles sharing another item's SKU.
+ * Catalog records still use the SKU; pagination must count the website's own IDs. */
+export function listingProductKey(model: SiteObject): string {
+  const id = Number(model.Id);
+  if (Number.isSafeInteger(id) && id > 0) return `id:${id}`;
+  const url = text(model.Url);
+  return url ? `url:${url}` : `code:${normalizeProductCode(model.CodeNumber)}`;
+}
 export interface SiteObject {
   [key: string]: unknown;
   Category?: SiteObject;
