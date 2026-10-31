@@ -10,6 +10,11 @@ import type { ReviewInput } from "../documents/domain/review";
 import { EmailService } from "../email/email.service";
 import { notificationAudit } from "./notification-audit";
 import {
+  privateIdentityQuery,
+  redactPrivateText,
+  type PrivateIdentity,
+} from "../documents/private-identity";
+import {
   notificationJoins,
   notificationEligibility,
 } from "./notification-visibility";
@@ -57,18 +62,23 @@ export class NotificationsRepository {
          (SELECT count(*)::int FROM visible WHERE read_at IS NULL) unread_count`,
       [actor.organizationId, actor.userId, unreadOnly],
     );
+    const identities = await this.db.query<PrivateIdentity>(
+      privateIdentityQuery,
+      [actor.organizationId],
+    );
+    const redact = (text: string) => redactPrivateText(text, identities);
     return {
       notifications: (result?.notifications ?? []).map((row) => ({
         id: row.id,
         type: row.type,
         campaignId: row.campaign_id ?? row.post_id,
         documentKind: row.post_id ? "post" : "campaign",
-        campaignName: row.campaign_name,
+        campaignName: redact(row.campaign_name),
         pageIndex: row.page_index,
         commentId: row.comment_id,
-        actorName: row.actor_name,
-        actorEmail: row.actor_email,
-        message: row.message,
+        actorName: redact(row.actor_name),
+        actorEmail: row.actor_email ? redact(row.actor_email) : null,
+        message: redact(row.message),
         createdAt: new Date(row.created_at).toISOString(),
         readAt: row.read_at ? new Date(row.read_at).toISOString() : null,
       })),
@@ -118,6 +128,8 @@ export class NotificationsRepository {
     input: ReviewInput,
     kind: DocumentKind = "campaign",
   ): Promise<void> {
+    // Operator work may remain in the shared artwork, but never announces support activity.
+    if (actor.accountRole === "superadmin") return;
     const event = campaign.reviewHistory.at(-1);
     if (!event) return;
     const members = (
@@ -181,27 +193,14 @@ export class NotificationsRepository {
       threadEmails,
     });
     const actorName =
-      actor.accountRole === "superadmin"
-        ? "Workspace team"
-        : actor.name?.trim() || actor.email.split("@")[0] || "Team member";
-    const actorEmail = actor.accountRole === "superadmin" ? null : actor.email;
-    // The shared review visibility already redacts support identities in documents. Never put
-    // their email into notification prose, including user-entered quoted reply text.
-    const supportEmails = (
-      await client.query<{ email: string }>(
-        "SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.account_role='superadmin'",
-        [actor.organizationId],
-      )
-    ).rows.map((row) => row.email);
-    const redact = (text: string) =>
-      supportEmails.reduce(
-        (value, email) =>
-          value.replaceAll(
-            new RegExp(email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"),
-            "Workspace team",
-          ),
-        text,
-      );
+      actor.name?.trim() || actor.email.split("@")[0] || "Team member";
+    const actorEmail = actor.email;
+    const identities = (
+      await client.query<PrivateIdentity>(privateIdentityQuery, [
+        actor.organizationId,
+      ])
+    ).rows;
+    const redact = (text: string) => redactPrivateText(text, identities);
     const workflowMessages = {
       submit:
         input.language === "en"

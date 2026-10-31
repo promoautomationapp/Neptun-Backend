@@ -2,6 +2,13 @@ import { Inject, Injectable } from "@nestjs/common";
 import { Database } from "../../database/database";
 import type { Actor } from "../auth/domain/actor";
 import type { Campaign, Post } from "./domain/document";
+import {
+  privateIdentityQuery,
+  privateIdentityLabel,
+  redactPrivateText,
+  redactPrivateValues,
+  type PrivateIdentity,
+} from "./private-identity";
 
 /** Hide operator identities in shared document responses, keeping the audit data intact. */
 @Injectable()
@@ -13,23 +20,38 @@ export class DocumentVisibility {
     value: T,
   ): Promise<T> {
     if (actor.accountRole === "superadmin") return value;
-    const rows = await this.db.query<{ email: string }>(
-      "SELECT u.email FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND m.account_role='superadmin'",
-      [actor.organizationId],
+    const rows = await this.db.query<PrivateIdentity>(privateIdentityQuery, [
+      actor.organizationId,
+    ]);
+    const hidden = new Map(
+      rows.flatMap((row) =>
+        [row.id, row.email, row.name]
+          .filter(Boolean)
+          .map(
+            (value) =>
+              [value.toLowerCase(), privateIdentityLabel(row)] as const,
+          ),
+      ),
     );
-    const hidden = new Set(rows.map((row) => row.email.toLowerCase()));
-    const isHidden = (identity: unknown) =>
-      typeof identity === "string" && hidden.has(identity.toLowerCase());
+    const isHidden = (value: unknown) =>
+      typeof value === "string" && hidden.has(value.toLowerCase());
+    const privateText = (text: string) => redactPrivateText(text, rows);
     const identity = <V>(value: V): V =>
-      (isHidden(value) ? "Workspace team" : value) as V;
+      (typeof value === "string"
+        ? privateText(hidden.get(value.toLowerCase()) ?? value)
+        : value) as V;
     const document = (item: Campaign | Post) => ({
       ...item,
-      updatedBy: identity(item.updatedBy),
+      updatedBy:
+        typeof item.updatedBy === "string"
+          ? privateText(identity(item.updatedBy))
+          : item.updatedBy,
       ...(Array.isArray(item.reviewComments)
         ? {
             reviewComments: (item as Campaign).reviewComments.map(
               (comment) => ({
-                ...comment,
+                ...redactPrivateValues(comment, rows),
+                text: privateText(comment.text),
                 authorEmail: identity(comment.authorEmail),
                 fixedBy: identity(comment.fixedBy),
                 mention: isHidden(comment.mention) ? null : comment.mention,
@@ -41,7 +63,8 @@ export class DocumentVisibility {
                     }
                   : {}),
                 replies: comment.replies.map((reply) => ({
-                  ...reply,
+                  ...redactPrivateValues(reply, rows),
+                  text: privateText(reply.text),
                   authorEmail: identity(reply.authorEmail),
                   mention: isHidden(reply.mention) ? null : reply.mention,
                   ...(reply.mentions
@@ -58,15 +81,18 @@ export class DocumentVisibility {
         : {}),
       ...(Array.isArray(item.reviewHistory)
         ? {
-            reviewHistory: (item as Campaign).reviewHistory.map((event) => ({
-              ...event,
-              actor: identity(event.actor),
-              role: event.role === "superadmin" ? "admin" : event.role,
-            })),
+            reviewHistory: (item as Campaign).reviewHistory
+              .filter(
+                (event) =>
+                  event.role !== "superadmin" &&
+                  !isHidden(event.actor) &&
+                  privateText(event.actor) === event.actor,
+              )
+              .map((event) => redactPrivateValues(event, rows)),
           }
         : {}),
     });
-    // Only the string identity fields above change; the document shape is retained.
+    // Preserve customer work while omitting hidden actor history; persisted audit remains intact.
     return (Array.isArray(value)
       ? value.map(document)
       : document(value)) as unknown as T;

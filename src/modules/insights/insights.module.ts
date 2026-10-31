@@ -52,7 +52,7 @@ interface UsageRow {
 }
 function requireSuperadmin(req: AuthenticatedRequest) {
   if (req.actor.accountRole !== "superadmin")
-    throw new ForbiddenException("Only superadmins can view project usage.");
+    throw new ForbiddenException("This page is not available.");
   return req.actor.organizationId;
 }
 export class InsightsRepository {

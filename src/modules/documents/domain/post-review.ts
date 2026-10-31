@@ -10,6 +10,7 @@ export function applyPostReviewChanges(
   submitted: Post,
   actor: Actor,
   members: string[],
+  presentedText: (text: string) => string = (text) => text,
 ) {
   let current = campaignSchema.parse({
     ...submitted,
@@ -56,7 +57,7 @@ export function applyPostReviewChanges(
     const next = incoming.find((thread) => thread.id === old.id);
     if (
       !next ||
-      next.text !== old.text ||
+      (next.text !== old.text && next.text !== presentedText(old.text)) ||
       next.pageIndex !== old.pageIndex ||
       (old.fixed && !next.fixed)
     )
@@ -65,7 +66,11 @@ export function applyPostReviewChanges(
       );
     for (const reply of old.replies) {
       const nextReply = next.replies.find((value) => value.id === reply.id);
-      if (!nextReply || nextReply.text !== reply.text)
+      if (
+        !nextReply ||
+        (nextReply.text !== reply.text &&
+          nextReply.text !== presentedText(reply.text))
+      )
         throw new ConflictException(
           "Existing replies cannot be rewritten through autosave.",
         );

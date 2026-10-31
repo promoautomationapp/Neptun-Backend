@@ -103,7 +103,7 @@ export class IdentityService {
   async list(actor: Actor) {
     this.assertAdmin(actor);
     const rows = await this.db.query<UserRow>(
-      "SELECT u.id,u.email,u.name,u.created_at,u.last_login_at,u.email_verified_at,m.account_role,m.status,m.invited_at,m.workspace_access FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND ($2 OR m.account_role<>'superadmin') ORDER BY CASE m.account_role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 WHEN 'pm' THEN 2 ELSE 3 END,u.email",
+      "SELECT u.id,u.email,u.name,u.created_at,u.last_login_at,u.email_verified_at,m.account_role,m.status,m.invited_at,m.workspace_access FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=$1 AND ($2 OR (m.account_role<>'superadmin' AND m.status<>'disabled')) ORDER BY CASE m.account_role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 WHEN 'pm' THEN 2 ELSE 3 END,u.email",
       [actor.organizationId, actor.accountRole === "superadmin"],
     );
     return { users: rows.map(userView), emailConfigured: this.mail.configured };
@@ -177,7 +177,7 @@ export class IdentityService {
       );
       if (found.rows.length)
         throw new ConflictException(
-          "This email already has an account. Manage the existing user or resend their invitation.",
+          "This email cannot be invited. Choose a different work email.",
         );
       const passwordHash = await hash(randomBytes(48).toString("base64url"), {
         type: argon2id,
@@ -251,7 +251,8 @@ export class IdentityService {
       const target = found.rows[0];
       if (
         !target ||
-        (target.account_role === "superadmin" &&
+        ((target.account_role === "superadmin" ||
+          target.status === "disabled") &&
           actor.accountRole !== "superadmin")
       )
         throw new NotFoundException("User was not found.");
@@ -347,7 +348,7 @@ export class IdentityService {
       const user = result.rows[0];
       if (
         !user ||
-        (user.account_role === "superadmin" &&
+        ((user.account_role === "superadmin" || user.status === "disabled") &&
           actor.accountRole !== "superadmin")
       )
         throw new NotFoundException("User was not found.");

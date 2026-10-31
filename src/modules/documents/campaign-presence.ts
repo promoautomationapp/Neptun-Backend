@@ -48,24 +48,19 @@ export class CampaignPresenceRepository {
     includeSupport = false,
   ) {
     const rows = await this.db.query<PresenceRow>(
-      "SELECT p.session_id,p.user_id,u.email,u.name,p.mode,p.page_label,m.account_role FROM campaign_edit_presence p JOIN users u ON u.id=p.user_id LEFT JOIN memberships m ON m.user_id=p.user_id AND m.organization_id=p.organization_id JOIN campaigns c ON c.organization_id=p.organization_id AND c.id=p.campaign_id WHERE p.organization_id=$1 AND p.campaign_id=$2 AND c.deleted_at IS NULL AND p.last_seen_at>now()-interval '70 seconds' ORDER BY u.email,p.session_id",
+      "SELECT p.session_id,p.user_id,u.email,u.name,p.mode,p.page_label,m.account_role FROM campaign_edit_presence p JOIN users u ON u.id=p.user_id LEFT JOIN memberships m ON m.user_id=p.user_id AND m.organization_id=p.organization_id JOIN campaigns c ON c.organization_id=p.organization_id AND c.id=p.campaign_id WHERE p.organization_id=$1 AND p.campaign_id=$2 AND c.deleted_at IS NULL AND coalesce(m.status,'active')='active' AND p.last_seen_at>now()-interval '70 seconds' ORDER BY u.email,p.session_id",
       [organizationId, campaignId],
     );
-    return rows.map((row) => ({
-      sessionId: row.session_id,
-      userId:
-        !includeSupport && row.account_role === "superadmin"
-          ? "workspace-team"
-          : row.user_id,
-      email:
-        !includeSupport && row.account_role === "superadmin" ? "" : row.email,
-      name:
-        !includeSupport && row.account_role === "superadmin"
-          ? "Workspace team"
-          : row.name || "",
-      mode: row.mode,
-      pageLabel: row.page_label,
-    }));
+    return rows
+      .filter((row) => includeSupport || row.account_role !== "superadmin")
+      .map((row) => ({
+        sessionId: row.session_id,
+        userId: row.user_id,
+        email: row.email,
+        name: row.name || "",
+        mode: row.mode,
+        pageLabel: row.page_label,
+      }));
   }
   async heartbeat(actor: Actor, campaignId: string, input: PresenceInput) {
     const campaign = await this.db.query(

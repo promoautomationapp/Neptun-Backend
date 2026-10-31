@@ -289,8 +289,12 @@ describe("per-member workspace access", () => {
       .admin!.patch(`/api/team/users/${ids.pm}`)
       .send({ status: "disabled" })
       .expect(200);
-    const enabled = await agents
+    await agents
       .admin!.patch(`/api/team/users/${ids.pm}`)
+      .send({ status: "active" })
+      .expect(404);
+    const enabled = await agents
+      .superadmin!.patch(`/api/team/users/${ids.pm}`)
       .send({ status: "active" })
       .expect(200);
     expect(enabled.body.user).toMatchObject({

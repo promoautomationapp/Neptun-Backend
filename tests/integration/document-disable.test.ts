@@ -170,7 +170,7 @@ describe("disabled workspace documents", () => {
         await agent
           .post(`/api/team/${collection}/${id}/restore`)
           .send({ version: 2 })
-          .expect(403);
+          .expect(404);
       }
       const failedSave = await agents
         .superadmin!.post(`/api/team/${collection}`)

@@ -11,6 +11,7 @@ import { ErrorFilter } from "../../src/shared/error.filter";
 import {
   EmailService,
   decryptEmail,
+  encryptEmail,
 } from "../../src/modules/email/email.service";
 import { AccountEmailTransport } from "../../src/modules/email/email-transport";
 import { NotificationsRepository } from "../../src/modules/notifications/notifications.repository";
@@ -403,7 +404,7 @@ describe("review notifications", () => {
     );
   });
 
-  test("support actions have friendly notification identity and never email support identities", async () => {
+  test("support activity never creates customer notifications or emails, including legacy inbox rows", async () => {
     const item = await campaign(`Title ${emails.support}`);
     await agents
       .support!.post(`/api/team/campaigns/${item.id}/review`)
@@ -414,26 +415,87 @@ describe("review notifications", () => {
         mentions: [emails.admin, emails.staff],
       })
       .expect(201);
-    for (const key of ["admin", "staff"]) {
-      const notices = await forCampaign(key, item.id);
-      expect(notices).toEqual([
-        expect.objectContaining({
-          actorName: "Workspace team",
-          actorEmail: null,
-          type: "mention",
-        }),
-      ]);
-      expect(JSON.stringify(notices)).not.toContain(emails.support);
-    }
-    const queued = await db.query<{ encrypted_payload: string }>(
-      "SELECT encrypted_payload FROM email_outbox WHERE notification_id IN(SELECT id FROM workspace_notifications WHERE campaign_id=$1)",
+    const legacyId = randomUUID();
+    await db.query(
+      `INSERT INTO workspace_notifications(id,organization_id,recipient_id,event_id,type,campaign_id,campaign_name,actor_id,actor_role,actor_name,actor_email,message)
+      VALUES($1,$2,$3,$4,'mention',$5,'Legacy',$6,'superadmin','Workspace team',NULL,'Legacy support work')`,
+      [legacyId, organizationId, ids.admin, randomUUID(), item.id, ids.support],
+    );
+    for (const key of ["admin", "staff"])
+      expect(await forCampaign(key, item.id)).toEqual([]);
+    await agents.admin!.post(`/api/notifications/${legacyId}/read`).expect(404);
+    const queued = await db.query(
+      "SELECT id FROM email_outbox WHERE notification_id IN(SELECT id FROM workspace_notifications WHERE campaign_id=$1)",
       [item.id],
     );
-    expect(queued).toHaveLength(2);
-    for (const row of queued)
-      expect(JSON.stringify(decryptEmail(row.encrypted_payload))).not.toContain(
-        emails.support,
+    expect(queued).toEqual([]);
+  });
+
+  test("legacy quoted private identities are redacted from inbox and queued review email at delivery", async () => {
+    const item = await campaign();
+    const notificationId = randomUUID();
+    const text = `Quoted [${emails.support}] [${ids.support}], active new${emails.support}`;
+    const presentedText = `Quoted [Workspace team] [Workspace team], active new${emails.support}`;
+    await db.query(
+      `INSERT INTO workspace_notifications(id,organization_id,recipient_id,event_id,type,campaign_id,campaign_name,actor_id,actor_role,actor_name,actor_email,message)
+      VALUES($1,$2,$3,$4,'mention',$5,$6,$7,'staff','Name staff',$8,$6)`,
+      [
+        notificationId,
+        organizationId,
+        ids.admin,
+        randomUUID(),
+        item.id,
+        text,
+        ids.staff,
+        emails.staff,
+      ],
+    );
+    const [notice] = await forCampaign("admin", item.id);
+    expect(notice!.message).toBe(presentedText);
+    expect(JSON.stringify(notice)).not.toContain(ids.support);
+    await db.query(
+      "INSERT INTO email_outbox(recipient,kind,encrypted_payload,notification_id,created_at) VALUES($1,'workspace-notification',$2,$3,'2000-01-01')",
+      [
+        emails.admin,
+        encryptEmail({
+          to: emails.admin!,
+          name: "Name admin",
+          kind: "workspace-notification",
+          notification: {
+            id: notificationId,
+            campaignName: text,
+            actorName: "Name staff",
+            message: text,
+            pageIndex: 0,
+            pageLabel: text,
+            action: "comment",
+            reason: "mentioned",
+            language: "en",
+          },
+        }),
+        notificationId,
+      ],
+    );
+    const service = app.get(EmailService);
+    const send = jest
+      .spyOn(AccountEmailTransport.prototype, "send")
+      .mockResolvedValue("isolated-mock-provider");
+    const configured = jest
+      .spyOn(service, "configured", "get")
+      .mockReturnValue(true);
+    try {
+      await service.deliverPending();
+      const delivered = send.mock.calls.find(
+        ([, message]) => message.notification?.id === notificationId,
       );
+      expect(delivered).toBeDefined();
+      expect(delivered![1].notification!.message).toBe(presentedText);
+      expect(JSON.stringify(delivered)).not.toContain(ids.support);
+      expect(delivered![1].notification!.message).toContain("Workspace team");
+    } finally {
+      configured.mockRestore();
+      send.mockRestore();
+    }
   });
 
   test("notification enqueue failure rolls back the review and its ledger event", async () => {

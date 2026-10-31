@@ -264,6 +264,9 @@ export const BROCHURE_DESIGN_KEYS = [
   "showOnlineStore",
   "showInteriorFooter",
   "showFooterPageNumber",
+  "storesSnapshot",
+  "selectedStoreIndexes",
+  "storeOrder",
   "storeFields",
   "contactVisibility",
   "storesHiddenElements",
@@ -315,6 +318,29 @@ export const brochurePresetSchema = z.object({
       storesBackgroundImage: source.optional(),
       coverImage: source.optional(),
       installments: z.number().int().min(1).max(60).optional(),
+      storesSnapshot: z
+        .object({
+          stores: z
+            .array(
+              z.object({
+                id: z.string().max(100).optional(),
+                city: text.default(""),
+                name: text.default(""),
+                address: text.default(""),
+                phone: text.default(""),
+                visible: z.boolean().default(true),
+              }),
+            )
+            .max(200),
+          contact: z.record(z.string().max(100), text),
+        })
+        .strict()
+        .optional(),
+      selectedStoreIndexes: z
+        .array(z.number().int().min(0).max(199))
+        .max(200)
+        .optional(),
+      storeOrder: z.array(z.number().int().min(0).max(199)).max(200).optional(),
     })
     .catchall(json)
     .superRefine((design, ctx) => {

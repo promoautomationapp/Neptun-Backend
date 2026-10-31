@@ -70,7 +70,7 @@ export class AiController {
     @QueryParam("month") month?: string,
   ) {
     if (req.actor.accountRole !== "superadmin")
-      throw new ForbiddenException("Only superadmins can view AI usage.");
+      throw new ForbiddenException("This page is not available.");
     return this.queries.execute(
       new GetAiUsageQuery(
         req.actor.organizationId,

@@ -222,6 +222,58 @@ describe("administrator activity ledger", () => {
     }
     await request(app.getHttpServer()).get("/api/activity").expect(401);
   });
+  test("deleted documents and disabled people disappear from customer records, actor choices, and counts", async () => {
+    const action = `privacy.hidden.${suffix}`;
+    const campaignId = randomUUID(),
+      postId = randomUUID(),
+      disabledId = randomUUID();
+    const disabledEmail = `disabled-ledger-${suffix}@example.test`;
+    await db.query(
+      "INSERT INTO users(id,email,name,password_hash) VALUES($1,$2,'Hidden former colleague','qa')",
+      [disabledId, disabledEmail],
+    );
+    await db.query(
+      "INSERT INTO memberships(organization_id,user_id,role,review_role,account_role,status) VALUES($1,$2,'editor','staff','staff','disabled')",
+      [org, disabledId],
+    );
+    await db.query(
+      "INSERT INTO campaigns(organization_id,id,name,layout,deleted_at) VALUES($1,$2,'Deleted brochure',$3,now())",
+      [
+        org,
+        campaignId,
+        { id: campaignId, name: "Deleted brochure", products: [] },
+      ],
+    );
+    await db.query(
+      "INSERT INTO social_posts(organization_id,id,name,layout,deleted_at) VALUES($1,$2,'Deleted post',$3,now())",
+      [org, postId, { id: postId, name: "Deleted post", products: [] }],
+    );
+    for (const [targetType, targetId, actorId] of [
+      ["campaign", campaignId, ids.admin],
+      ["post", postId, ids.admin],
+      ["user", disabledId, ids.admin],
+      ["settings", null, disabledId],
+    ]) {
+      await db.query(
+        "INSERT INTO activity_audit(organization_id,actor_id,actor_role,action,target_type,target_id,method,route,status_code,duration_ms,request_id) VALUES($1,$2,'staff',$6,$3,$4,'POST','/api/team/campaigns',200,1,$5)",
+        [org, actorId, targetType, targetId, randomUUID(), action],
+      );
+    }
+    const regular = (
+      await agents.admin!.get("/api/activity").query({ action }).expect(200)
+    ).body;
+    expect(regular.total).toBe(0);
+    expect(regular.records).toEqual([]);
+    expect(regular.actions).not.toContain(action);
+    expect(JSON.stringify(regular.users)).not.toContain(disabledEmail);
+    expect(JSON.stringify(regular)).not.toContain(campaignId);
+    const support = (
+      await agents.support!.get("/api/activity").query({ action }).expect(200)
+    ).body;
+    expect(support.total).toBe(4);
+    expect(JSON.stringify(support)).toContain(disabledEmail);
+    expect(JSON.stringify(support)).toContain(campaignId);
+  });
   test("filters inclusive local dates, user/action/search/outcome and pagination, preserving old history as unknown IP", async () => {
     for (const at of [
       "2026-03-31T21:59:59Z",

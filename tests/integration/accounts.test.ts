@@ -252,7 +252,7 @@ describe("invitation-only workspace accounts", () => {
         .send({
           action: "comment",
           pageIndex: 0,
-          text: "Please check the price",
+          text: `Please check the price, ${addresses.support} (${supportId})`,
           version: saved.version,
         })
         .expect(201)
@@ -262,6 +262,8 @@ describe("invitation-only workspace accounts", () => {
     expect(JSON.stringify(publicDoc)).not.toContain(addresses.support);
     expect(JSON.stringify(publicDoc)).not.toContain("superadmin");
     expect(publicDoc.reviewComments[0].authorEmail).toBe("Workspace team");
+    expect(publicDoc.reviewHistory).toEqual([]);
+    expect(JSON.stringify(publicDoc)).not.toContain(supportId);
     expect(
       JSON.stringify((await staff.get("/api/team/campaigns").expect(200)).body),
     ).not.toContain(addresses.support);
@@ -286,6 +288,10 @@ describe("invitation-only workspace accounts", () => {
       await support.get(`/api/team/campaigns/${id}`).expect(200)
     ).body.campaign;
     expect(privateDoc.reviewComments[0].authorEmail).toBe(addresses.support);
+    expect(privateDoc.reviewComments[0].text).toContain(addresses.support);
+    expect(privateDoc.reviewComments[0].text).toContain(supportId);
+    expect(privateDoc.reviewHistory[0].actor).toBe(addresses.support);
+    expect(privateDoc.reviewHistory[0].role).toBe("superadmin");
     const sessionId = randomUUID();
     await support
       .post(`/api/team/campaigns/${id}/presence`)
@@ -294,14 +300,7 @@ describe("invitation-only workspace accounts", () => {
     const presence = (
       await admin.get(`/api/team/campaigns/${id}/presence`).expect(200)
     ).body;
-    expect(presence.participants).toEqual([
-      expect.objectContaining({
-        name: "Workspace team",
-        email: "",
-        mode: "edit",
-        pageLabel: "Cover",
-      }),
-    ]);
+    expect(presence.participants).toEqual([]);
     expect(JSON.stringify(presence)).not.toContain(addresses.support);
     expect(JSON.stringify(presence)).not.toContain(supportId);
     expect(
@@ -310,6 +309,59 @@ describe("invitation-only workspace accounts", () => {
           .body,
       ),
     ).toContain(addresses.support);
+  });
+  test("a customer can save a redacted social comment view without erasing private stored work", async () => {
+    const id = randomUUID();
+    const source = {
+      id,
+      name: "Private social work",
+      products: [],
+      reviewComments: [
+        {
+          id: randomUUID(),
+          pageIndex: 0,
+          pageLabel: "Post",
+          text: `Review ${addresses.support} ${supportId}`,
+          authorEmail: addresses.support,
+          createdAt: new Date().toISOString(),
+          replies: [],
+        },
+      ],
+    };
+    const created = (
+      await support.post("/api/team/posts").send({ post: source }).expect(201)
+    ).body.post;
+    const presented = (await admin.get(`/api/team/posts/${id}`).expect(200))
+      .body.post;
+    expect(JSON.stringify(presented)).not.toContain(addresses.support);
+    expect(JSON.stringify(presented)).not.toContain(supportId);
+    expect(presented.reviewHistory).toEqual([]);
+    const saved = (
+      await admin
+        .post("/api/team/posts")
+        .send({ post: { ...presented, name: "Social title edited" } })
+        .expect(201)
+    ).body.post;
+    expect(saved.name).toBe("Social title edited");
+    expect(JSON.stringify(saved)).not.toContain(addresses.support);
+    const original = (await support.get(`/api/team/posts/${id}`).expect(200))
+      .body.post;
+    expect(original.reviewComments).toEqual(created.reviewComments);
+    expect(original.reviewHistory).toEqual(created.reviewHistory);
+    await admin
+      .post("/api/team/posts")
+      .send({
+        post: {
+          ...saved,
+          reviewComments: saved.reviewComments.map(
+            (comment: { text: string }) => ({
+              ...comment,
+              text: comment.text + " rewritten",
+            }),
+          ),
+        },
+      })
+      .expect(409);
   });
   test("renaming a pending invite with an unchanged submitted role preserves its link", async () => {
     await admin
@@ -486,6 +538,16 @@ describe("invitation-only workspace accounts", () => {
     await admin
       .patch(`/api/team/users/${staffId}`)
       .send({ status: "active" })
+      .expect(404);
+    const regular = await admin.get("/api/team/users").expect(200);
+    expect(
+      regular.body.users.some((user: { id: string }) => user.id === staffId),
+    ).toBe(false);
+    const operator = await support.get("/api/team/users").expect(200);
+    expect(JSON.stringify(operator.body)).toContain(addresses.staff);
+    await support
+      .patch(`/api/team/users/${staffId}`)
+      .send({ status: "active" })
       .expect(200);
   });
   test("resending an invitation expires the previous link", async () => {
@@ -539,8 +601,13 @@ describe("invitation-only workspace accounts", () => {
     await admin
       .patch(`/api/team/users/${userId}`)
       .send({ status: "active" })
+      .expect(404);
+    await admin.post(`/api/team/users/${userId}/resend-invite`).expect(404);
+    await support
+      .patch(`/api/team/users/${userId}`)
+      .send({ status: "active" })
       .expect(400);
-    const resent = await admin
+    const resent = await support
       .post(`/api/team/users/${userId}/resend-invite`)
       .expect(201);
     expect(resent.body.user.status).toBe("invited");

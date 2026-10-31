@@ -218,8 +218,11 @@ export class ActivityRepository {
       WHERE ($2 OR a.organization_id=$1)
     ), visible AS (
       SELECT h.*,u.name actor_name,u.email actor_email,o.name organization_name FROM history h LEFT JOIN users u ON u.id=h.actor_id JOIN organizations o ON o.id=h.organization_id
-      WHERE ($2 OR (h.actor_role IN ('admin','staff','pm') AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.organization_id=h.organization_id AND m.user_id=h.actor_id AND m.account_role='superadmin')
-        AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.organization_id=h.organization_id AND m.user_id::text=h.target_id AND m.account_role='superadmin')))
+      WHERE ($2 OR (h.actor_role IN ('admin','staff','pm') AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.organization_id=h.organization_id AND m.user_id=h.actor_id AND (m.account_role='superadmin' OR m.status='disabled'))
+        AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.organization_id=h.organization_id AND m.user_id::text=h.target_id AND (m.account_role='superadmin' OR m.status='disabled'))
+        AND NOT EXISTS(SELECT 1 FROM campaigns c WHERE h.target_type='campaign' AND c.organization_id=h.organization_id AND c.id=h.target_id AND c.deleted_at IS NOT NULL)
+        AND NOT EXISTS(SELECT 1 FROM social_posts p WHERE h.target_type='post' AND p.organization_id=h.organization_id AND p.id=h.target_id AND p.deleted_at IS NOT NULL)
+        AND NOT EXISTS(SELECT 1 FROM workspace_notifications n LEFT JOIN campaigns c ON c.organization_id=n.organization_id AND c.id=n.campaign_id LEFT JOIN social_posts p ON p.organization_id=n.organization_id AND p.id=n.post_id LEFT JOIN memberships sender ON sender.organization_id=n.organization_id AND sender.user_id=n.actor_id WHERE h.target_type='notification' AND n.organization_id=h.organization_id AND n.id::text=h.target_id AND (n.actor_role='superadmin' OR sender.account_role='superadmin' OR sender.status='disabled' OR c.deleted_at IS NOT NULL OR p.deleted_at IS NOT NULL))))
     )`;
     const conditions = `WHERE ($3::date IS NULL OR created_at>=($3::date::timestamp AT TIME ZONE 'Europe/Belgrade'))
       AND ($4::date IS NULL OR created_at<(($4::date+1)::timestamp AT TIME ZONE 'Europe/Belgrade'))

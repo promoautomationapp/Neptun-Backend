@@ -3,7 +3,6 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-  ForbiddenException,
 } from "@nestjs/common";
 import type { PoolClient } from "pg";
 import { Database } from "../../database/database";
@@ -27,6 +26,11 @@ import type { ReviewInput } from "./domain/review";
 import type { JsonObject } from "../../shared/json";
 import { databasePrice } from "../../shared/price";
 import { applyPostReviewChanges } from "./domain/post-review";
+import {
+  privateIdentityQuery,
+  redactPrivateText,
+  type PrivateIdentity,
+} from "./private-identity";
 const tables = { campaign: "campaigns", post: "social_posts" } as const;
 @Injectable()
 export class DocumentsRepository {
@@ -112,11 +116,20 @@ export class DocumentsRepository {
             [actor.organizationId],
           )
         ).rows.map((row) => row.email.toLowerCase());
+        const privateIdentities =
+          actor.accountRole === "superadmin"
+            ? []
+            : (
+                await client.query<PrivateIdentity>(privateIdentityQuery, [
+                  actor.organizationId,
+                ])
+              ).rows;
         const authorized = applyPostReviewChanges(
           existing ? postSchema.parse(existing.layout) : undefined,
           postSchema.parse(document),
           actor,
           members,
+          (text) => redactPrivateText(text, privateIdentities),
         );
         Object.assign(document, authorized.document);
         postEvents = authorized.events;
@@ -255,9 +268,7 @@ export class DocumentsRepository {
     version?: number,
   ): Promise<Campaign | Post> {
     if (actor.accountRole !== "superadmin")
-      throw new ForbiddenException(
-        "Only support administrators can enable disabled documents.",
-      );
+      throw new NotFoundException("Document not found.");
     return this.db.transaction(async (client) => {
       await this.lock(client, actor.organizationId, kind, id);
       const row = (

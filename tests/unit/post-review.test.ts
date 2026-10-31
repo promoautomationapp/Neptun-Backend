@@ -120,3 +120,48 @@ test("new replies and resolution produce distinct server-authorized events once"
     applyPostReviewChanges(prior, next, pm, ["staff@test", "pm@test"]),
   ).toThrow();
 });
+
+test("a redacted presentation roundtrip preserves immutable raw comment/reply text", () => {
+  const source = incoming();
+  source.reviewComments![0]!.text = "Ask support@example.test";
+  const prior = applyPostReviewChanges(undefined, source, pm, [
+    "staff@test",
+    "pm@test",
+  ]).document;
+  prior.reviewComments![0]!.replies.push({
+    id: "private-reply",
+    text: "From support@example.test",
+    authorEmail: "support@example.test",
+    createdAt: "2026-10-31",
+  });
+  const redact = (text: string) =>
+    text.replaceAll("support@example.test", "Workspace team");
+  const presented = structuredClone(prior);
+  presented.reviewComments![0]!.text = redact(
+    presented.reviewComments![0]!.text,
+  );
+  presented.reviewComments![0]!.replies[0]!.text = redact(
+    presented.reviewComments![0]!.replies[0]!.text,
+  );
+  presented.reviewHistory = [];
+  const saved = applyPostReviewChanges(
+    prior,
+    presented,
+    staff,
+    ["staff@test", "pm@test"],
+    redact,
+  );
+  expect(saved.document.reviewComments).toEqual(prior.reviewComments);
+  expect(saved.document.reviewHistory).toEqual(prior.reviewHistory);
+  expect(saved.events).toEqual([]);
+  presented.reviewComments![0]!.text += " rewritten";
+  expect(() =>
+    applyPostReviewChanges(
+      prior,
+      presented,
+      staff,
+      ["staff@test", "pm@test"],
+      redact,
+    ),
+  ).toThrow("Existing review comments cannot be rewritten");
+});

@@ -14,6 +14,11 @@ import type { PoolClient } from "pg";
 import { Database } from "../../database/database";
 import { env } from "../../config/environment";
 import { notificationAudit } from "../notifications/notification-audit";
+import {
+  privateIdentityQuery,
+  redactPrivateText,
+  type PrivateIdentity,
+} from "../documents/private-identity";
 import { accountEmail } from "./templates";
 import type { AccountEmail } from "./templates";
 import { AccountEmailTransport, safeEmailFailure } from "./email-transport";
@@ -185,6 +190,25 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
                 [row.id],
               );
               continue;
+            }
+            // Older queued review messages may quote an identity that is hidden now.
+            // Authentication/invitation emails never pass through this redaction.
+            if (message.notification) {
+              const identities = await this.db.query<PrivateIdentity>(
+                privateIdentityQuery,
+                [notification.organization_id],
+              );
+              const redact = (text: string) =>
+                redactPrivateText(text, identities);
+              message.notification = {
+                ...message.notification,
+                campaignName: redact(message.notification.campaignName),
+                actorName: redact(message.notification.actorName),
+                message: redact(message.notification.message),
+                ...(message.notification.pageLabel
+                  ? { pageLabel: redact(message.notification.pageLabel) }
+                  : {}),
+              };
             }
           }
           const content = accountEmail(message);

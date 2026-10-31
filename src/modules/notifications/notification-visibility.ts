@@ -7,6 +7,9 @@ export const notificationJoins = `
 export const notificationEligibility = `
  ((n.campaign_id IS NOT NULL AND c.id IS NOT NULL AND c.deleted_at IS NULL)
   OR (n.post_id IS NOT NULL AND p.id IS NOT NULL AND p.deleted_at IS NULL))
+ AND n.actor_role<>'superadmin'
+ AND NOT EXISTS (SELECT 1 FROM memberships sender WHERE sender.organization_id=n.organization_id
+  AND sender.user_id=n.actor_id AND (sender.account_role='superadmin' OR sender.status='disabled'))
  AND m.status='active' AND m.account_role<>'superadmin' AND u.email_verified_at IS NOT NULL
  AND (n.post_id IS NULL OR m.account_role='admin' OR m.workspace_access IS NULL
   OR m.workspace_access->>'mode' IS DISTINCT FROM 'custom'
