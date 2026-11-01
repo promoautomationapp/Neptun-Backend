@@ -45,6 +45,7 @@ const gradient = z.object({
   to: z.string().regex(/^#[0-9a-f]{6}$/i),
   angle: z.number().min(0).max(360),
 });
+const ribbonColors = gradient.pick({ from: true, to: true });
 const background = z
   .object({
     color: color.default(""),
@@ -171,6 +172,7 @@ export const brochureDefaultsSchema = z
     showCoverLogo: z.boolean().default(true),
     showCoverBand: z.boolean().default(false),
     coverBandVariant: z.enum(["uuu", "hajde", "online"]).optional(),
+    coverRibbonColors: ribbonColors.optional(),
     showCoverHeadline: z.boolean().default(false),
     showCoverMessage: z.boolean().default(false),
     showCoverGradient: z.boolean().default(false),
@@ -239,6 +241,7 @@ export const BROCHURE_DESIGN_KEYS = [
   "showCoverLogo",
   "showCoverBand",
   "coverBandVariant",
+  "coverRibbonColors",
   "showCoverHeadline",
   "showCoverMessage",
   "showCoverGradient",
@@ -311,6 +314,7 @@ export const brochurePresetSchema = z.object({
       coverBackgroundColor: color.optional(),
       storesBackgroundColor: color.optional(),
       coverBackgroundGradient: gradient.nullable().optional(),
+      coverRibbonColors: ribbonColors.optional(),
       productBackgroundGradient: gradient.nullable().optional(),
       storesBackgroundGradient: gradient.nullable().optional(),
       coverBackgroundImage: source.optional(),

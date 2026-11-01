@@ -9,7 +9,9 @@ describe("brochure JSON contract", () => {
   test("validates editable footer geometry and preserves optional page number choices", () => {
     const base = { id: "footer", name: "Offers", products: [] };
     const footer = {
-      bottom: 3,
+      bottom: 19,
+      fadeEnd: true,
+      showAwards: false,
       height: 4,
       dateWidth: 34,
       dateText: "Vlen 24–31 tetor",

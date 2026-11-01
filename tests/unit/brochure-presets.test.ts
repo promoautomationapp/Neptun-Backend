@@ -5,6 +5,39 @@ import {
 import { campaignSchema } from "../../src/modules/documents/domain/document";
 
 describe("reusable brochure designs and page decoration contract", () => {
+  test("retains independent ribbon colors in campaigns and reusable defaults, rejecting unsafe colors", () => {
+    const coverRibbonColors = { from: "#123456", to: "#abcdef" };
+    const campaign = campaignSchema.parse({
+      id: "ribbon",
+      name: "Offer",
+      products: [],
+      coverRibbonColors,
+    });
+    expect(campaign.coverRibbonColors).toEqual(coverRibbonColors);
+    const settings = workspaceSettingsSchema.parse({
+      brochure: { coverRibbonColors },
+      brochurePresets: [
+        { id: "custom-ribbon", name: "Ribbon", design: { coverRibbonColors } },
+      ],
+    });
+    expect(settings.brochure.coverRibbonColors).toEqual(coverRibbonColors);
+    expect(settings.brochurePresets[0]!.design.coverRibbonColors).toEqual(
+      coverRibbonColors,
+    );
+    for (const from of ["red", "url(javascript:bad)", "#123456;display:none"]) {
+      expect(
+        campaignSchema.safeParse({
+          ...campaign,
+          coverRibbonColors: { ...coverRibbonColors, from },
+        }).success,
+      ).toBe(false);
+      expect(
+        workspaceSettingsSchema.safeParse({
+          brochure: { coverRibbonColors: { ...coverRibbonColors, from } },
+        }).success,
+      ).toBe(false);
+    }
+  });
   test("keeps original defaults, supports edited built-ins and independent custom designs", () => {
     const settings = resolveSettings({
       defaultBrochurePresetId: "custom-team",

@@ -47,6 +47,8 @@ export const historySchema = z
 export const brochureFooterSchema = z.object({
   style: z.enum(["bar", "reference"]).optional(),
   visible: z.boolean().optional(),
+  fadeEnd: z.boolean().optional(),
+  showAwards: z.boolean().optional(),
   dateText: z.string().max(2000).optional(),
   bottom: z.number().min(0).max(80).optional(),
   height: z.number().min(2).max(12).optional(),
@@ -69,6 +71,12 @@ export const campaignSchema = z
     brochureFooter: brochureFooterSchema.optional(),
     brochurePresetId: z.string().max(100).optional(),
     coverBrandTagline: z.string().max(500).optional(),
+    coverRibbonColors: z
+      .object({
+        from: z.string().regex(/^#[0-9a-f]{6}$/i),
+        to: z.string().regex(/^#[0-9a-f]{6}$/i),
+      })
+      .optional(),
     brochureVisualStyle: z.enum(["current", "october"]).optional(),
     pageDecorationDefaults: pageDecorationSchema.optional(),
     pages: z
