@@ -6,25 +6,25 @@ The database is Neon and media is in private Cloudflare R2. The existing Render 
 
 Connect the `Neptun-Backend` repository and choose the intended `main` branch. The backend is already at the repository root.
 
-| Setting            | Value                                      |
-| ------------------ | ------------------------------------------ |
-| Name               | `neptun-backend`                           |
-| Language           | Node                                       |
-| Region             | Frankfurt                                  |
-| Root directory     | Leave empty                                |
-| Build command      | `npm ci --include=dev && npm run build`    |
-| Start command      | `npm run start:combined`                   |
-| Health check path  | `/ready`                                   |
-| Pre-deploy command | Leave empty; migrations run during startup |
-| Persistent disk    | None; media is in R2                       |
+| Setting            | Value                                        |
+| ------------------ | -------------------------------------------- |
+| Name               | `neptun-backend`                             |
+| Language           | Node                                         |
+| Region             | Frankfurt                                    |
+| Root directory     | Leave empty                                  |
+| Build command      | `npm ci --include=dev && npm run build`      |
+| Start command      | `node dist/scripts/start-combined.js`        |
+| Health check path  | `/ready`                                     |
+| Pre-deploy command | Leave empty; owner migrations run separately |
+| Persistent disk    | None; media is in R2                         |
 
-The build explicitly includes development tools because TypeScript is needed during compilation even with `NODE_ENV=production`. Start and migration use compiled JavaScript. Existing applied migrations are checked and skipped safely; do not run demo seeding against the populated Neon database.
+The build explicitly includes development tools because TypeScript is needed during compilation even with `NODE_ENV=production`. Run required application/queue migrations with the separate owner credential on a trusted deployment machine before releasing schema changes. The long-running runtime account cannot perform DDL. Existing applied migrations are checked and skipped safely; do not run demo seeding against the populated Neon database.
 
 Render supplies `PORT`. Production configuration binds to `0.0.0.0`; do not import the local loopback host or a fixed local port. The health endpoint checks database connectivity.
 
 ## Bulk environment import
 
-Use **Environment Variables → Add from .env**. A private production file is prepared outside both repositories at `~/.local/share/neptun-broshura/render-backend.env`. It contains the Neon/R2/OpenAI connection settings and separate generated production session/upload secrets. It is intentionally not committed. Copy its complete contents into Render's importer, not into Git, issue comments, screenshots or chat.
+Use **Environment Variables → Add from .env**. The private initial setup file at `~/.local/share/neptun-broshura/render-backend.env` contains the original owner connection and must be treated as an operator/rollback file after hardening. Do not re-import it over restricted runtime settings. The dedicated `render-runtime-update.env` file contains only the two restricted replacement connection settings; merge these into the existing service without changing unrelated secrets. No private environment file belongs in Git, issue comments, screenshots or chat.
 
 Production uses `CORS_ORIGIN=https://neptun.promoautomation.app` and `PUBLIC_APP_URL=https://neptun.promoautomation.app`. The frontend Cloudflare Worker uses `API_ORIGIN=https://neptun-backend.onrender.com`. Keep `VITE_API_URL` empty so browser API requests go through the frontend's same-origin `/api/*` proxy. Database, R2 and OpenAI secrets belong only in Render. Keep the local backend `.env` for local development; do not replace it with the production file.
 
@@ -34,9 +34,9 @@ Ensure the local code changes have been committed and pushed before starting Ren
 
 ## Combined API and worker
 
-`npm run start:combined` first checks and applies migrations, starts the worker, waits for its PostgreSQL readiness message, then starts the API. This avoids waiting for a separate Render pre-deploy container. A migration failure prevents either process from starting; connection, lock and statement waits have bounded timeouts. Existing applied migrations are checked by checksum and skipped. A startup failure or either child exiting fails the whole service so Render can restart it. SIGTERM drains both processes, with a 35-second shutdown deadline. The API receives a 192 MB JavaScript heap limit and the worker 160 MB; image processing uses one native thread and a 16 MB Sharp cache. These are heap/cache limits, not a guarantee of total process memory use. Watch Render memory under real workloads and move the worker to a separate service if usage requires it.
+`node dist/scripts/start-combined.js` starts the worker, waits for its PostgreSQL readiness message, then starts the API. Owner-level migrations must have been prepared separately before schema-changing releases. A startup failure or either child exiting fails the whole service so Render can restart it. SIGTERM drains both processes, with a 35-second shutdown deadline. The API receives a 192 MB JavaScript heap limit and the worker 160 MB; image processing uses one native thread and a 16 MB Sharp cache. These are heap/cache limits, not a guarantee of total process memory use. Watch Render memory under real workloads and move the worker to a separate service if usage requires it.
 
-The Render Start Command is `npm run start:combined`, using the supervisor committed in this repository. Keep startup code in the repository so it is reviewed, tested and built with the application. Deploy the matching source before selecting a new package script in Render.
+The Render Start Command is `node dist/scripts/start-combined.js`, using the supervisor committed in this repository. `npm run start:combined` remains an owner-level migration wrapper for operator use; do not use that wrapper with restricted runtime credentials. Keep startup code in the repository so it is reviewed, tested and built with the application. Deploy the matching source before selecting a new command in Render.
 
 The worker registers `0 3 * * *` in `Europe/Belgrade` in PostgreSQL-backed PgBoss. This daily tick checks eligibility: automatic catalog refreshes run only once per three local calendar days. Failed automatic attempts count toward the interval and successful manual refreshes postpone the next automatic run; manual refresh remains available at any time. Worker startup catches up only when overdue, using the same database lock and interval gate. Queues handle catalog/category updates, cached media variants, and AI work requested for new content. Run one worker and stop any local production worker before activating the hosted replacement. A separate paid Background Worker is optional, not required for this initial deployment.
 

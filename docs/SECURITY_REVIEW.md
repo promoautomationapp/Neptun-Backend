@@ -16,11 +16,12 @@
 
 ## Actual console checks
 
-- Render's deployed backend was `3886820` before this security release; Cloudflare's frontend was `367ab6b`.
+- The security release is deployed: Render backend `7a54486`, Cloudflare frontend `541f067`. The later runtime-only start command deployment also succeeded; `/ready` returned 200.
 - R2 `neptun-studio-assets`: Public Access disabled, no public custom domain, public development URL disabled. Upload CORS lists only the production frontend and local development origin with GET/HEAD/PUT and checksum headers.
 - R2 lifecycle contains the default incomplete multipart abort rule. It does **not** delete expired single-object staging uploads. Presigned upload URLs are temporary bearer capabilities; object confirmation limits do not cap the storage cost of an abandoned direct upload. Scope any future staging cleanup specifically to expired staging keys, never the final `org/` asset tree.
 - Neon production: TLS 1.3 client connection authorized; no IP allowlist. The current Launch plan does not offer allowlisting/private networking in the console. Do not disable public networking without a working private path. History retention displayed six hours; current backup/restore operations need a separate operational review.
-- Runtime currently uses the database owner. All 42 application tables have RLS disabled. See [the dedicated runtime role plan](DATABASE_SECURITY.md) for the reviewed, staging-tested reduction in privileges and the deployment prerequisites. This credential switch has **not** been applied to production.
+- Cloudflare has an encrypted `EDGE_PROXY_SECRET` setting. The matching Render setting still needs secure entry; direct Render requests remain allowed until that happens.
+- The dedicated `neptun_runtime` account has been created and its real TLS connection/permissions verified. The service still uses the database owner until its two connection settings are changed in Render. All 42 application tables have RLS disabled. See [the dedicated runtime role plan](DATABASE_SECURITY.md) for the full API/queue staging checks, deployment prerequisites and live verification still required.
 
 ## Activate private Render admission
 

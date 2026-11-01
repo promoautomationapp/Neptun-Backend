@@ -1,6 +1,6 @@
 # Database security review and runtime role plan
 
-Reviewed 1 November 2026. No production roles, passwords, records or queue configuration were changed during this review.
+Reviewed 1 November 2026. The initial audit was read-only. During the subsequently authorized rollout, a dedicated `neptun_runtime` account was created and its connection/permissions verified. Render's runtime-only start command is deployed and healthy. The application credential switch remains pending secure entry in Render; the existing live connection has been retained.
 
 ## Confirmed controls
 
@@ -12,7 +12,7 @@ Reviewed 1 November 2026. No production roles, passwords, records or queue confi
 
 ## Remaining hardening and deployment checks
 
-**High priority: replace the owner credential in runtime.** Metadata inspection of the prepared production database connection showed `neondb_owner` owns all 42 public tables and has CREATE ROLE, CREATE DATABASE, REPLICATION and BYPASSRLS attributes. It can update/delete audit history. All 42 public tables currently have row-level security disabled. Application organization filters are a real control, but a compromised database credential or a future missing filter has no database-level tenant policy as a second boundary.
+**High priority: finish the runtime credential switch.** The live service still uses `neondb_owner` until the prepared connection settings are securely entered in Render. The owner owns all 42 public tables and has CREATE ROLE, CREATE DATABASE, REPLICATION and BYPASSRLS attributes; it can update/delete audit history. The new runtime account has no schema CREATE or audit UPDATE/DELETE privileges. All 42 public tables currently have row-level security disabled. Application organization filters are a real control, but a future missing filter has no database-level tenant policy as a second boundary.
 
 The role plan below reduces runtime privileges. It does not add tenant RLS: that requires a separate design for transaction-local tenant context across the API and cross-organization workers. A runtime role still needs the application's legitimate organization data; do not describe it as per-tenant database isolation.
 
@@ -86,4 +86,8 @@ Run application migrations separately with the owner on that trusted machine. Th
 
 **Do not switch credentials while keeping the current `npm run start:combined` command unchanged.** That script first runs owner-level application migrations. After the owner migration and queue preparation steps are verified, use `node dist/scripts/start-combined.js` as the runtime-only start command, with restricted `DATABASE_URL` and matching unpooled `DIRECT_DATABASE_URL`. Do not retain the owner/migration URL in Render's long-running application environment. Future pg-boss/schema upgrades must repeat the authorized preparation step before deployment; missing migrations should fail startup visibly, not prompt a privilege grant to runtime.
 
-Before rollout, verify the new role can start the API and worker, save settings/documents, deliver already-authorized queue work, and perform normal cleanup. Confirm it cannot CREATE/DROP tables, modify audit/history rows, edit schema versions, assume an owner role or access a different database. Keep the existing deployment available until these checks pass. This review did not change Render's start command or credentials.
+The isolated `runtime-workspace.test.ts` now exercises actual Nest sign-in/session, a 62-product brochure save/update/conflict, settings, image upload/read, social post save/read, comments/replies/resolution/review completion and prepared queue scheduling/fetch/completion under the restricted role. External providers are disabled; it sends no real mail or AI request. The role inventory separately checks all 42 tables and denied DDL/history mutations.
+
+During the authorized rollout, a real TLS connection as `neptun_runtime` verified normal read/save/upload grants and denied schema CREATE/audit mutations using metadata. Render's start command was changed to `node dist/scripts/start-combined.js`; the deployment succeeded and `/ready` returned 200. The private `render-runtime-update.env` file outside Git contains only the two replacement connection settings. The existing database owner and live connection were retained for rollback until the account owner enters these settings and the post-deploy checks pass.
+
+After the connection switch, verify live authenticated reads, queue startup and expected runtime connections in `pg_stat_activity`. PostgreSQL's default PUBLIC CONNECT can permit connections to other databases; this plan grants application table access only in the selected database and does not claim network or per-tenant isolation. Keep the current deployment available until the live checks pass. No owner credential should remain in the long-running Render environment.
