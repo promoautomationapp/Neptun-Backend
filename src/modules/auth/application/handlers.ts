@@ -1,7 +1,11 @@
 import { Inject, UnauthorizedException } from "@nestjs/common";
 import { Command, CommandHandler, Query, QueryHandler } from "@nestjs/cqrs";
 import type { ICommandHandler, IQueryHandler } from "@nestjs/cqrs";
-import { verify, hash, argon2id } from "argon2";
+import { argon2id } from "argon2";
+import {
+  hashPassword as hash,
+  verifyPassword as verify,
+} from "../../../security/password-work";
 import { randomBytes } from "node:crypto";
 import { IdentityService } from "../../users/identity.service";
 import { AuthRepository } from "../auth.repository";
@@ -31,13 +35,21 @@ export class LoginHandler implements ICommandHandler<LoginCommand> {
       900,
     );
     const credentials = await this.repository.credentials(command.email);
-    this.dummyHash ??= hash(randomBytes(32).toString("hex"), {
-      type: argon2id,
-    });
-    const valid = await verify(
-      credentials?.passwordHash ?? (await this.dummyHash),
-      command.password,
-    );
+    let digest = credentials?.passwordHash;
+    if (!digest) {
+      const pending = (this.dummyHash ??= hash(
+        randomBytes(32).toString("hex"),
+        { type: argon2id },
+      ));
+      try {
+        digest = await pending;
+      } catch (error) {
+        // A temporarily full work budget must not poison the cached dummy hash.
+        if (this.dummyHash === pending) this.dummyHash = undefined;
+        throw error;
+      }
+    }
+    const valid = await verify(digest, command.password);
     if (!credentials || !valid)
       throw new UnauthorizedException("Incorrect email or password.");
     const token = randomBytes(32).toString("base64url");

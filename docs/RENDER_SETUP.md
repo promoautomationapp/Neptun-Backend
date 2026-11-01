@@ -28,6 +28,8 @@ Use **Environment Variables → Add from .env**. A private production file is pr
 
 Production uses `CORS_ORIGIN=https://neptun.promoautomation.app` and `PUBLIC_APP_URL=https://neptun.promoautomation.app`. The frontend Cloudflare Worker uses `API_ORIGIN=https://neptun-backend.onrender.com`. Keep `VITE_API_URL` empty so browser API requests go through the frontend's same-origin `/api/*` proxy. Database, R2 and OpenAI secrets belong only in Render. Keep the local backend `.env` for local development; do not replace it with the production file.
 
+For direct-origin API rejection, install a dedicated matching `EDGE_PROXY_SECRET` on the Cloudflare Worker and Render. Follow [the private admission rollout](SECURITY_REVIEW.md#activate-private-render-admission) in that order; the gate stays inactive until the secret is present. See [database security](DATABASE_SECURITY.md) before changing runtime credentials.
+
 Ensure the local code changes have been committed and pushed before starting Render's deploy. The deploy uses Git, not this machine's uncommitted files.
 
 ## Combined API and worker

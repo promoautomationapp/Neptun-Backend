@@ -5,6 +5,7 @@ import type { PoolClient, QueryResultRow } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { env } from "../config/environment";
 import * as schema from "./schema";
+import { POSTGRES_AUTH_OPTIONS } from "./postgres-options";
 
 export const DATABASE_CONNECTION = Symbol("DATABASE_CONNECTION");
 
@@ -16,6 +17,7 @@ export class Database implements OnModuleDestroy {
     @Optional() @Inject(DATABASE_CONNECTION) connectionString?: string,
   ) {
     this.pool = new Pool({
+      ...POSTGRES_AUTH_OPTIONS,
       connectionString: connectionString ?? env.DATABASE_URL,
       max: 10,
       idleTimeoutMillis: 30_000,

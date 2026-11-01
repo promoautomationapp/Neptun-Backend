@@ -1,6 +1,10 @@
 import { normalizeAiParams } from "./domain/params";
+import { reserveBillableAiRequest } from "../../security/request-limits";
 import { findExactCatalogPhoto } from "./exact-catalog-photo";
-import { productImageSearchInputSchema, productImageSearchCacheIdentity } from "./domain/product-image-search";
+import {
+  productImageSearchInputSchema,
+  productImageSearchCacheIdentity,
+} from "./domain/product-image-search";
 import {
   Inject,
   Injectable,
@@ -114,7 +118,12 @@ export class AiRepository {
       organizationId: actor.organizationId,
       operation: request.operation,
       sourceSha256,
-      params: request.operation === "product_image_search" ? productImageSearchCacheIdentity(productImageSearchInputSchema.parse(normalized)) : normalized,
+      params:
+        request.operation === "product_image_search"
+          ? productImageSearchCacheIdentity(
+              productImageSearchInputSchema.parse(normalized),
+            )
+          : normalized,
       model,
       quality,
       promptVersion: version,
@@ -214,6 +223,7 @@ export class AiRepository {
         throw new ServiceUnavailableException(
           "Add OPENAI_API_KEY to the backend environment first. Saved results remain available.",
         );
+      await reserveBillableAiRequest(client, actor.organizationId);
       if (request.operation === "lifestyle")
         await this.lifestyle.reserveAttempt(client, actor.organizationId);
       const result = (

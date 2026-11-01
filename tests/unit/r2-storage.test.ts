@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+import { StorageReadLimitError } from "../../src/modules/storage/storage-read-limit";
 import { S3Client } from "@aws-sdk/client-s3";
 import { R2Storage } from "../../src/modules/storage/r2.storage";
 
@@ -80,5 +82,71 @@ describe("complete R2 media reads", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe("bounded untrusted R2 staging reads", () => {
+  test("rejects an oversized ContentLength before consuming and destroys the body without retrying", async () => {
+    const consume = jest.fn(async () => Buffer.from("never read"));
+    const destroy = jest.fn();
+    const send = jest.fn().mockResolvedValue({
+      ContentLength: 101,
+      Body: { destroy, transformToByteArray: consume },
+    });
+    (S3Client as unknown as jest.Mock).mockImplementation(() => ({ send }));
+    await expect(
+      new R2Storage().read("org/owned/staging/intent", 100),
+    ).rejects.toBeInstanceOf(StorageReadLimitError);
+    expect(consume).not.toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([undefined, 1])(
+    "bounds actual chunks when ContentLength is %s and stops before later chunks",
+    async (ContentLength) => {
+      let readLastChunk = false;
+      let closed = false;
+      const source = (async function* () {
+        try {
+          yield Buffer.from("1234");
+          yield Buffer.from("5678");
+          readLastChunk = true;
+          yield Buffer.from("must not be read");
+        } finally {
+          closed = true;
+        }
+      })();
+      const destroy = jest.fn();
+      const body = { [Symbol.asyncIterator]: () => source, destroy };
+      const send = jest.fn().mockResolvedValue({ ContentLength, Body: body });
+      (S3Client as unknown as jest.Mock).mockImplementation(() => ({ send }));
+      await expect(
+        new R2Storage().read("org/owned/staging/intent", 6),
+      ).rejects.toBeInstanceOf(StorageReadLimitError);
+      expect(readLastChunk).toBe(false);
+      expect(closed).toBe(true);
+      expect(destroy).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test("accepts an exact-size streamed body and preserves its original bytes", async () => {
+    const body = Readable.from([Buffer.from("123"), Buffer.from("456")]);
+    const send = jest.fn().mockResolvedValue({ ContentLength: 6, Body: body });
+    (S3Client as unknown as jest.Mock).mockImplementation(() => ({ send }));
+    expect(await new R2Storage().read("org/owned/staging/intent", 6)).toEqual(
+      Buffer.from("123456"),
+    );
+  });
+
+  test("rejects invalid limits before sending storage requests", async () => {
+    const send = jest.fn();
+    (S3Client as unknown as jest.Mock).mockImplementation(() => ({ send }));
+    for (const maxBytes of [0, -1, NaN, Infinity, 1.5])
+      await expect(
+        new R2Storage().read("org/owned/staging/intent", maxBytes),
+      ).rejects.toThrow("Invalid storage read limit");
+    expect(send).not.toHaveBeenCalled();
   });
 });

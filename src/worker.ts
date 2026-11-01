@@ -10,6 +10,7 @@ import {
   CATALOG_TIME_ZONE,
 } from "./modules/catalog/catalog-schedule";
 import { directConnection } from "./database/direct-connection";
+import { POSTGRES_AUTH_OPTIONS } from "./database/postgres-options";
 import { OpenAiProvider } from "./worker/ai/provider";
 import { processAiJob } from "./worker/ai/processor";
 import { z } from "zod";
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
     env.DIRECT_DATABASE_URL,
   );
   const boss = new PgBoss({
+    ...POSTGRES_AUTH_OPTIONS,
     connectionString,
     pollingIntervalSeconds: env.QUEUE_POLL_SECONDS,
     supervise: true,

@@ -4,6 +4,8 @@ export const logger = pino({
   redact: [
     "req.headers.authorization",
     "req.headers.cookie",
+    "req.headers['x-neptun-edge-signature']",
+    "req.headers['x-neptun-edge-client-ip']",
     "password",
     "passwordHash",
     "apiKey",

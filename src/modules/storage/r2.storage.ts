@@ -10,6 +10,11 @@ import type { StoragePort } from "./storage.port";
 import { env } from "../../config/environment";
 import { readWithStorageRetry } from "./storage-retry";
 import { withStorageDeadline } from "./storage-deadline";
+import {
+  readBoundedStream,
+  StorageReadLimitError,
+  validateReadLimit,
+} from "./storage-read-limit";
 
 export class R2Storage implements StoragePort {
   private readonly client = new S3Client({
@@ -41,7 +46,8 @@ export class R2Storage implements StoragePort {
       ),
     );
   }
-  async read(key: string): Promise<Buffer> {
+  async read(key: string, maxBytes?: number): Promise<Buffer> {
+    validateReadLimit(maxBytes);
     return readWithStorageRetry(() =>
       withStorageDeadline(async (signal) => {
         const result = await this.client.send(
@@ -60,7 +66,25 @@ export class R2Storage implements StoragePort {
             abort();
             throw signal.reason;
           }
+          if (maxBytes !== undefined) {
+            if (
+              result.ContentLength !== undefined &&
+              result.ContentLength > maxBytes
+            )
+              throw new StorageReadLimitError();
+            // The Node S3 response is a Readable. Do not use transformToByteArray
+            // here: it buffers the entire untrusted staging object first.
+            const stream = body as typeof body & AsyncIterable<Uint8Array>;
+            if (typeof stream[Symbol.asyncIterator] !== "function")
+              throw new Error(
+                "Storage response does not support bounded reads.",
+              );
+            return await readBoundedStream(stream, maxBytes);
+          }
           return Buffer.from(await body.transformToByteArray());
+        } catch (error) {
+          abort();
+          throw error;
         } finally {
           signal.removeEventListener("abort", abort);
         }

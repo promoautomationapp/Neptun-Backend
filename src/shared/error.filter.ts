@@ -20,6 +20,18 @@ export class ErrorFilter implements ExceptionFilter {
     }
     if (error instanceof HttpException) {
       const result = error.getResponse();
+      if (
+        error.getStatus() === 429 &&
+        typeof result === "object" &&
+        result !== null &&
+        "retryAfterSeconds" in result &&
+        typeof result.retryAfterSeconds === "number" &&
+        result.retryAfterSeconds > 0
+      )
+        response.setHeader(
+          "Retry-After",
+          String(Math.ceil(result.retryAfterSeconds)),
+        );
       response
         .status(error.getStatus())
         .json(

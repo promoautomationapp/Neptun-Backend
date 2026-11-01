@@ -2,11 +2,13 @@ import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { directConnection } from "../src/database/direct-connection";
+import { POSTGRES_AUTH_OPTIONS } from "../src/database/postgres-options";
 import { Client } from "pg";
 import { env } from "../src/config/environment";
 
 async function main(): Promise<void> {
   const client = new Client({
+    ...POSTGRES_AUTH_OPTIONS,
     connectionString: directConnection(
       env.DATABASE_URL,
       env.DIRECT_DATABASE_URL,

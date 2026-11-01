@@ -8,7 +8,11 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { argon2id, hash, verify } from "argon2";
+import { argon2id } from "argon2";
+import {
+  hashPassword as hash,
+  verifyPassword as verify,
+} from "../../security/password-work";
 import {
   createHmac,
   randomBytes,

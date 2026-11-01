@@ -34,6 +34,7 @@ import { Database } from "../../database/database";
 import { Public } from "../auth/auth.guard";
 import { env } from "../../config/environment";
 import { UPLOAD_IMAGE_TYPES } from "./image-input";
+import { StorageReadLimitError } from "../storage/storage-read-limit";
 import {
   ExportImageController,
   ExportImageService,
@@ -202,7 +203,14 @@ export class UploadService {
       if (!row.valid) throw new BadRequestException("Upload expired.");
       if (!(await this.storage.exists(row.storage_key)))
         throw new BadRequestException("Upload the image before confirming.");
-      const bytes = await this.storage.read(row.storage_key);
+      let bytes: Buffer;
+      try {
+        bytes = await this.storage.read(row.storage_key, Number(row.max_size));
+      } catch (error) {
+        if (error instanceof StorageReadLimitError)
+          throw new BadRequestException("Invalid or oversized upload.");
+        throw error;
+      }
       if (!bytes.length || bytes.length > Number(row.max_size))
         throw new BadRequestException("Invalid or oversized upload.");
       const asset = await ingestAsset(

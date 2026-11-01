@@ -15,6 +15,7 @@ import { Public } from "../auth/auth.guard";
 import type { AuthenticatedRequest } from "../auth/domain/actor";
 import { workspaceAccessSchema } from "../auth/domain/workspace-access";
 import { IdentityService } from "./identity.service";
+import { verifiedClientIp } from "../../security/edge-proxy";
 const email = z.string().trim().toLowerCase().pipe(z.email());
 const name = z.string().trim().min(1).max(120);
 const role = z.enum(["staff", "pm", "admin"]);
@@ -77,7 +78,10 @@ export class UsersController {
     @Req() req: Request,
     @Query("token") value: string,
   ) {
-    return this.identity.inspectToken(token.parse(value), req.ip ?? "local");
+    return this.identity.inspectToken(
+      token.parse(value),
+      verifiedClientIp(req) ?? "local",
+    );
   }
   @Post("accept-invitation") @Public() accept(
     @Req() req: Request,
@@ -87,7 +91,7 @@ export class UsersController {
     return this.identity.acceptInvitation(
       input.token,
       input.password,
-      req.ip ?? "local",
+      verifiedClientIp(req) ?? "local",
     );
   }
   @Post("request-invitation-code") @Public() invitationCode(
@@ -96,7 +100,7 @@ export class UsersController {
   ) {
     return this.identity.requestInvitationCode(
       tokenBody.parse(body).token,
-      req.ip ?? "local",
+      verifiedClientIp(req) ?? "local",
     );
   }
   @Post("verify-invitation") @Public() verify(
@@ -107,7 +111,7 @@ export class UsersController {
     return this.identity.verifyInvitation(
       input.token,
       input.code,
-      req.ip ?? "local",
+      verifiedClientIp(req) ?? "local",
     );
   }
   @Post("forgot-password") @Public() forgot(
@@ -116,7 +120,7 @@ export class UsersController {
   ) {
     return this.identity.forgot(
       z.object({ email }).strict().parse(body).email,
-      req.ip ?? "local",
+      verifiedClientIp(req) ?? "local",
     );
   }
   @Post("request-reset-code") @Public() resetCode(
@@ -125,7 +129,7 @@ export class UsersController {
   ) {
     return this.identity.requestResetCode(
       tokenBody.parse(body).token,
-      req.ip ?? "local",
+      verifiedClientIp(req) ?? "local",
     );
   }
   @Post("reset-password") @Public() reset(
@@ -137,7 +141,7 @@ export class UsersController {
       input.token,
       input.code,
       input.password,
-      req.ip ?? "local",
+      verifiedClientIp(req) ?? "local",
     );
   }
 }

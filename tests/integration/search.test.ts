@@ -106,4 +106,49 @@ describe("search with reference catalog examples", () => {
       ).total,
     ).toBe(0);
   });
+  test("SQL-shaped filters and wildcard category paths stay literal and cannot escape tenant/category scope", async () => {
+    const safeCode = `scope-safe-${randomUUID()}`;
+    await db.query(
+      "INSERT INTO products(organization_id,code,name,brand,category_path) VALUES($1,$2,'Audit scoped allowed','Audit','TV > OLED'),($1,$3,'Audit scoped hidden','Audit','IT > Computers')",
+      [org, safeCode, `scope-hidden-${randomUUID()}`],
+    );
+    const filters = {
+      q: "",
+      code: "",
+      category: "",
+      subcategory: "",
+      brand: "",
+      limit: 60,
+      offset: 0,
+    };
+    const scoped = await repo.list(org, { ...filters, q: "Audit" }, [
+      "TV > OLED",
+    ]);
+    expect(scoped.products.map((product) => product.code)).toEqual([safeCode]);
+    for (const field of [
+      "code",
+      "category",
+      "subcategory",
+      "brand",
+      "categoryPath",
+    ] as const) {
+      expect(
+        (await repo.list(org, { ...filters, [field]: "' OR true --" }))
+          .products,
+      ).toEqual([]);
+    }
+    expect(
+      (await repo.list(org, { ...filters, q: "' OR true --" })).products,
+    ).toEqual([]);
+    expect(
+      (await repo.list(org, filters, ["TV > OLED%' OR true --"])).products,
+    ).toEqual([]);
+    expect(await repo.batch(org, ["') OR true --"])).toEqual([]);
+    expect(await repo.batch(randomUUID(), [safeCode])).toEqual([]);
+    expect(
+      (await repo.batch(org, [safeCode], ["TV > OLED"])).map(
+        (product) => product.code,
+      ),
+    ).toEqual([safeCode]);
+  });
 });

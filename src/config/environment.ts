@@ -17,6 +17,7 @@ const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   HOST: z.string().min(1).optional(),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
+  EDGE_PROXY_SECRET: z.union([z.literal(""), z.string().min(32)]).default(""),
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
@@ -83,6 +84,42 @@ const schema = z.object({
   SEED_DEFAULT_PASSWORD: z.string().default(""),
   LIFESTYLE_MONTHLY_LIMIT: z.coerce.number().int().nonnegative().default(20),
   LIFESTYLE_MONTHLY_ATTEMPTS: z.coerce.number().int().nonnegative().default(30),
+  API_RATE_LIMIT_PER_SECOND: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100000)
+    .default(60),
+  API_RATE_LIMIT_PER_MINUTE: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1000000)
+    .default(600),
+  ASSET_RATE_LIMIT_PER_SECOND: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100000)
+    .default(120),
+  ASSET_RATE_LIMIT_PER_MINUTE: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1000000)
+    .default(2400),
+  AI_NEW_JOBS_LIMIT_15_MINUTES: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100000)
+    .default(240),
+  AI_NEW_JOBS_LIMIT_PER_HOUR: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1000000)
+    .default(960),
   AI_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(3).default(3),
   AI_IMAGE_CONCURRENCY: z.coerce.number().int().min(1).default(1),
   AI_TEXT_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(2),

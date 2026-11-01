@@ -1,6 +1,7 @@
 import {
   mkdir,
   readFile,
+  open,
   writeFile,
   access,
   unlink,
@@ -9,6 +10,11 @@ import {
 import { resolve, relative, dirname, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { StoragePort } from "./storage.port";
+import {
+  readBoundedStream,
+  StorageReadLimitError,
+  validateReadLimit,
+} from "./storage-read-limit";
 
 export class LocalStorage implements StoragePort {
   private readonly root: string;
@@ -31,8 +37,22 @@ export class LocalStorage implements StoragePort {
     await writeFile(temporary, bytes, { mode: 0o600 });
     await rename(temporary, path);
   }
-  read(key: string): Promise<Buffer> {
-    return readFile(this.path(key));
+  async read(key: string, maxBytes?: number): Promise<Buffer> {
+    validateReadLimit(maxBytes);
+    const path = this.path(key);
+    if (maxBytes === undefined) return readFile(path);
+    const file = await open(path, "r");
+    try {
+      if ((await file.stat()).size > maxBytes)
+        throw new StorageReadLimitError();
+      // Read the same opened file that was checked, with a streaming second check.
+      return await readBoundedStream(
+        file.createReadStream({ autoClose: false }),
+        maxBytes,
+      );
+    } finally {
+      await file.close();
+    }
   }
   async exists(key: string): Promise<boolean> {
     try {

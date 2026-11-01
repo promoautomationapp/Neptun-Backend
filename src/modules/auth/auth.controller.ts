@@ -4,6 +4,7 @@ import type { Response, Request } from "express";
 import { z } from "zod";
 import { IdentityService } from "../users/identity.service";
 import { env } from "../../config/environment";
+import { verifiedClientIp } from "../../security/edge-proxy";
 import { COOKIE, Public, sessionToken } from "./auth.guard";
 import { publicUser } from "./domain/actor";
 import type { AuthenticatedRequest } from "./domain/actor";
@@ -43,7 +44,11 @@ export class AuthController {
       })
       .parse(body);
     const result = await this.commands.execute(
-      new LoginCommand(input.email, input.password, request.ip ?? "local"),
+      new LoginCommand(
+        input.email,
+        input.password,
+        verifiedClientIp(request) ?? "local",
+      ),
     );
     response.cookie(COOKIE, result.token, {
       httpOnly: true,
