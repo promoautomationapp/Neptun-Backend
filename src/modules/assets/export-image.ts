@@ -22,6 +22,7 @@ import type { AssetRow } from "./assets.repository";
 import { STORAGE } from "../storage/storage.port";
 import type { StoragePort } from "../storage/storage.port";
 import type { AuthenticatedRequest } from "../auth/domain/actor";
+import { sendStoredAsset } from "./asset-response";
 
 export const EXPORT_IMAGE_DOWNLOADER = Symbol("EXPORT_IMAGE_DOWNLOADER");
 export type ExportImageDownloader = (source: string) => Promise<PublicDownload>;
@@ -173,14 +174,14 @@ export class ExportImageController {
         url,
       ),
     );
-    response.vary("Cookie").vary("Origin");
-    response
-      .set({
+    await sendStoredAsset(this.storage, asset, response, (reply) => {
+      reply.vary("Cookie").vary("Origin");
+      reply.set({
         "Cache-Control": "private, no-store",
         "Content-Type": asset.mime_type,
         "X-Content-Type-Options": "nosniff",
         "Cross-Origin-Resource-Policy": "cross-origin",
-      })
-      .send(await this.storage.read(asset.storage_key));
+      });
+    });
   }
 }

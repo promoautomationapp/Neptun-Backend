@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { NotFoundException } from "@nestjs/common";
 import type { QueryBus } from "@nestjs/cqrs";
@@ -20,6 +21,7 @@ describe("authenticated remote image delivery", () => {
     id: randomUUID(),
     storage_key: "org/tenant/assets/approved.png",
     mime_type: "image/png",
+    size: String(bytes.length),
   } as AssetRow;
   function fixture(found: AssetRow | null = asset) {
     const execute = jest.fn().mockResolvedValue(found);
@@ -35,15 +37,25 @@ describe("authenticated remote image delivery", () => {
       {} as UploadService,
       {} as AssetsRepository,
     );
-    const response = {
+    const response = Object.assign(new EventEmitter(), {
       vary: jest.fn(),
       set: jest.fn(),
       type: jest.fn(),
       send: jest.fn(),
       redirect: jest.fn(),
-    };
-    for (const method of Object.values(response))
+    });
+    for (const method of [
+      response.vary,
+      response.set,
+      response.type,
+      response.send,
+      response.redirect,
+    ])
       method.mockReturnValue(response);
+    response.send.mockImplementation(() => {
+      response.emit("finish");
+      return response;
+    });
     const request = {
       actor: { organizationId: "tenant" },
     } as AuthenticatedRequest;
@@ -56,7 +68,7 @@ describe("authenticated remote image delivery", () => {
       organizationId: "tenant",
       id: asset.id,
     });
-    expect(remote.read).toHaveBeenCalledWith(asset.storage_key);
+    expect(remote.read).toHaveBeenCalledWith(asset.storage_key, bytes.length);
     expect(response.send).toHaveBeenCalledWith(bytes);
     expect(response.type).toHaveBeenCalledWith("image/png");
     expect(response.set).toHaveBeenCalledWith(

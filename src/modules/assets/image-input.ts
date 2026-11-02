@@ -1,6 +1,10 @@
 import { BadRequestException } from "@nestjs/common";
 import sharp from "sharp";
 import type { Metadata, Sharp } from "sharp";
+import {
+  MAX_STORED_ASSET_BYTES,
+  withImageConversion,
+} from "../../security/image-work";
 
 export const UPLOAD_IMAGE_TYPES = [
   "image/png",
@@ -17,6 +21,10 @@ const MAX_IMAGE_PIXELS = 67_000_000;
 export async function canonicalAssetInput(bytes: Buffer, mimeType: string) {
   if (!mimeType.startsWith("image/"))
     return { bytes, mimeType, width: null, height: null };
+  if (bytes.length > MAX_STORED_ASSET_BYTES)
+    throw new BadRequestException(
+      "This image exceeds the supported byte limit.",
+    );
   let image: Sharp;
   let details: Metadata;
   try {
@@ -45,19 +53,27 @@ export async function canonicalAssetInput(bytes: Buffer, mimeType: string) {
       "Image MIME type does not match the file contents.",
     );
   if (mimeType === "image/svg+xml" || mimeType === "image/avif") {
-    try {
-      const normalized = await image
-        .png()
-        .toBuffer({ resolveWithObject: true });
-      return {
-        bytes: normalized.data,
-        mimeType: "image/png",
-        width: normalized.info.width,
-        height: normalized.info.height,
-      };
-    } catch {
-      throw new BadRequestException("The image could not be converted to PNG.");
-    }
+    return withImageConversion(async () => {
+      try {
+        const normalized = await image
+          .png()
+          .toBuffer({ resolveWithObject: true });
+        if (normalized.data.length > MAX_STORED_ASSET_BYTES)
+          throw new BadRequestException(
+            "This image exceeds the supported byte limit.",
+          );
+        return {
+          bytes: normalized.data,
+          mimeType: "image/png",
+          width: normalized.info.width,
+          height: normalized.info.height,
+        };
+      } catch {
+        throw new BadRequestException(
+          "The image could not be converted to PNG.",
+        );
+      }
+    });
   }
   return { bytes, mimeType, width: details.width, height: details.height };
 }

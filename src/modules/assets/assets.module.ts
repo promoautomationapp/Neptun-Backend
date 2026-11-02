@@ -36,6 +36,11 @@ import { env } from "../../config/environment";
 import { UPLOAD_IMAGE_TYPES } from "./image-input";
 import { StorageReadLimitError } from "../storage/storage-read-limit";
 import {
+  withUploadConfirmation,
+  imageWorkBusy,
+} from "../../security/image-work";
+import { sendStoredAsset } from "./asset-response";
+import {
   ExportImageController,
   ExportImageService,
   CacheExportImageHandler,
@@ -88,6 +93,10 @@ export class IngestAssetHandler implements ICommandHandler<IngestAssetCommand> {
 }
 @Injectable()
 export class UploadService {
+  private readonly pendingConfirmations = new Map<
+    string,
+    Promise<{ assetId: string; url: string; sha256: string | undefined }>
+  >();
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(STORAGE) private readonly storage: StoragePort,
@@ -170,70 +179,92 @@ export class UploadService {
     });
   }
   async confirm(request: AuthenticatedRequest, id: string) {
-    const result = await this.db.transaction(async (client) => {
-      // A row lock serializes PUT and confirmation across API instances. All writes use
-      // this same connection so concurrent confirmations cannot exhaust the pool.
-      const row = (
-        await client.query<{
-          storage_key: string;
-          max_size: string;
-          mime_type: string;
-          asset_id: string | null;
-          valid: boolean;
-        }>(
-          "SELECT storage_key,max_size,mime_type,asset_id,expires_at>clock_timestamp() valid FROM upload_intents WHERE organization_id=$1 AND id=$2 FOR UPDATE",
-          [request.actor.organizationId, id],
-        )
-      ).rows[0];
-      if (!row) throw new NotFoundException("Upload not found.");
-      if (row.asset_id) {
-        const asset = (
-          await client.query<{ sha256: string }>(
-            "SELECT sha256 FROM assets WHERE organization_id=$1 AND id=$2",
-            [request.actor.organizationId, row.asset_id],
+    const key = `${request.actor.organizationId}:${id}`;
+    const existing = this.pendingConfirmations.get(key);
+    if (existing) return existing;
+    if (this.pendingConfirmations.size >= 64) throw imageWorkBusy();
+    // Repeated confirmations of one tenant-owned upload share a single operation.
+    // Different intents still need their own bounded native/storage admission.
+    const pending = withUploadConfirmation(async () => {
+      const result = await this.db.transaction(async (client) => {
+        // A row lock serializes PUT and confirmation across API instances. All writes use
+        // this same connection so concurrent confirmations cannot exhaust the pool.
+        const row = (
+          await client.query<{
+            storage_key: string;
+            max_size: string;
+            mime_type: string;
+            asset_id: string | null;
+            valid: boolean;
+          }>(
+            "SELECT storage_key,max_size,mime_type,asset_id,expires_at>clock_timestamp() valid FROM upload_intents WHERE organization_id=$1 AND id=$2 FOR UPDATE",
+            [request.actor.organizationId, id],
           )
         ).rows[0];
+        if (!row) throw new NotFoundException("Upload not found.");
+        if (row.asset_id) {
+          const asset = (
+            await client.query<{ sha256: string }>(
+              "SELECT sha256 FROM assets WHERE organization_id=$1 AND id=$2",
+              [request.actor.organizationId, row.asset_id],
+            )
+          ).rows[0];
+          return {
+            assetId: row.asset_id,
+            url: assetUrl(row.asset_id),
+            sha256: asset?.sha256,
+            stagingKey: row.storage_key,
+          };
+        }
+        if (!row.valid) throw new BadRequestException("Upload expired.");
+        if (!(await this.storage.exists(row.storage_key)))
+          throw new BadRequestException("Upload the image before confirming.");
+        let bytes: Buffer;
+        try {
+          bytes = await this.storage.read(
+            row.storage_key,
+            Number(row.max_size),
+          );
+        } catch (error) {
+          if (error instanceof StorageReadLimitError)
+            throw new BadRequestException("Invalid or oversized upload.");
+          throw error;
+        }
+        if (!bytes.length || bytes.length > Number(row.max_size))
+          throw new BadRequestException("Invalid or oversized upload.");
+        const asset = await ingestAsset(
+          this.db,
+          this.storage,
+          request.actor.organizationId,
+          bytes,
+          row.mime_type,
+          { createdBy: request.actor.userId, client },
+        );
+        await client.query(
+          "UPDATE upload_intents SET asset_id=$3 WHERE organization_id=$1 AND id=$2",
+          [request.actor.organizationId, id, asset.id],
+        );
         return {
-          assetId: row.asset_id,
-          url: assetUrl(row.asset_id),
-          sha256: asset?.sha256,
+          assetId: asset.id,
+          url: assetUrl(asset.id),
+          sha256: asset.sha256,
           stagingKey: row.storage_key,
         };
-      }
-      if (!row.valid) throw new BadRequestException("Upload expired.");
-      if (!(await this.storage.exists(row.storage_key)))
-        throw new BadRequestException("Upload the image before confirming.");
-      let bytes: Buffer;
-      try {
-        bytes = await this.storage.read(row.storage_key, Number(row.max_size));
-      } catch (error) {
-        if (error instanceof StorageReadLimitError)
-          throw new BadRequestException("Invalid or oversized upload.");
-        throw error;
-      }
-      if (!bytes.length || bytes.length > Number(row.max_size))
-        throw new BadRequestException("Invalid or oversized upload.");
-      const asset = await ingestAsset(
-        this.db,
-        this.storage,
-        request.actor.organizationId,
-        bytes,
-        row.mime_type,
-        { createdBy: request.actor.userId, client },
-      );
-      await client.query(
-        "UPDATE upload_intents SET asset_id=$3 WHERE organization_id=$1 AND id=$2",
-        [request.actor.organizationId, id, asset.id],
-      );
+      });
+      await this.storage.remove(result.stagingKey);
       return {
-        assetId: asset.id,
-        url: assetUrl(asset.id),
-        sha256: asset.sha256,
-        stagingKey: row.storage_key,
+        assetId: result.assetId,
+        url: result.url,
+        sha256: result.sha256,
       };
     });
-    await this.storage.remove(result.stagingKey);
-    return { assetId: result.assetId, url: result.url, sha256: result.sha256 };
+    this.pendingConfirmations.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.pendingConfirmations.get(key) === pending)
+        this.pendingConfirmations.delete(key);
+    }
   }
 }
 @Controller("api/assets")
@@ -322,14 +353,15 @@ export class AssetsController {
     response: Response,
     privateAsset = true,
   ): Promise<void> {
-    if (privateAsset) response.vary("Cookie");
     // Keep authenticated images on the API origin. Browser image inspection
     // uses credentials, which cannot follow an R2 redirect without credential
     // CORS support. The storage adapter still reads the unchanged R2 bytes.
-    response
-      .set("Cache-Control", "private, max-age=31536000, immutable")
-      .type(asset.mime_type)
-      .send(await this.storage.read(asset.storage_key));
+    await sendStoredAsset(this.storage, asset, response, (reply) => {
+      if (privateAsset) reply.vary("Cookie");
+      reply
+        .set("Cache-Control", "private, max-age=31536000, immutable")
+        .type(asset.mime_type);
+    });
   }
 }
 @Module({

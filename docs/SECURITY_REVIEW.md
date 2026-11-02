@@ -1,4 +1,17 @@
-# Security review — 1 November 2026
+# Security review — 2 November 2026
+
+## Production verification — 2 November
+
+- Cloudflare's zone dashboard confirms network-layer and SSL/TLS DDoS rules are **Active**, and its HTTP DDoS managed ruleset is always enabled. These reduce attack traffic; they are not a guarantee of uninterrupted service under every attack.
+- Added the available Free-plan rate limiting rule **Neptun API request flood protection** (`5a994cc07c7749c0a854281d15adf3ee`). It matches only `neptun.promoautomation.app` API paths, excluding `/api/assets/`, and blocks a client IP for 10 seconds after more than 300 matching requests in 10 seconds. The saved rule is **Active**. Media keeps its separate application limits so normal grids can load many photos. This does not add a paid subscription. No flood/load test was performed against production.
+- There are no custom WAF rules or separately configured managed WAF rulesets in the zone dashboard. Application SQL parameterization and rich-text sanitization remain necessary; do not claim a managed SQL/XSS WAF ruleset is deployed.
+- Bounded live probes returned: `/ready` 200; direct Render session request 403 `EDGE_REQUIRED`; the same request with a forged approved Origin 403 `EDGE_REQUIRED`; correctly signed private session probe 200. A 200 anonymous session envelope does not grant a user session or data access.
+- A read-only PostgreSQL check found 11 `neptun_runtime` connections and one owner connection from the operator check itself. The runtime credential remains restricted. R2 still reports **Public Access: Disabled**.
+- Both frontend and backend `npm audit --omit=dev` reports contain zero known vulnerabilities as of this check. This is dependency advisory coverage, not proof that application code is vulnerability-free.
+- The reviewed query paths bind input values through PostgreSQL parameters, including product search, document/settings reads and writes, and account management. Tenant and role checks are server-side. No SQL injection or stored-script execution path was found in the reviewed code and focused regressions; this is not an exhaustive penetration test.
+- The image admission update passes all 360 backend tests, including isolated database/API integration, plus lint and production build. HTTP media reads reserve at most 64 MiB across eight active responses, with at most 64 waiting requests and a 10-second queue timeout. Stored-image reads enforce both recorded and streamed size (maximum 32 MiB, preserving the existing 22 MiB asset). Reservations remain held until the response finishes/disconnects; stalled responses close after 120 seconds.
+- Upload confirmations have two active slots before database/object work. Repeated confirmations of the same organization/upload share one in-flight result; this preserves idempotency without repeated decoding. SVG/AVIF canonical conversion has one active slot and four bounded waiters, so normal two-image batches still succeed. Busy responses use 429 and Retry-After. Background thumbnail processing has its existing separate queue and pixel cap; do not describe these new HTTP/canonical limits as a global limit on every image operation in every process.
+- Public sign-in branding and the explicitly allowlisted brochure fonts are intentionally readable through the platform. Tenant asset IDs/legacy aliases require a session and tenant checks. Custom HTTPS image URLs are still permitted by the editor; do not claim that arbitrary user-added remote images can only load through R2.
 
 ## Shipped application controls
 
