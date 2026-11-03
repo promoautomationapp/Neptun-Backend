@@ -13,6 +13,7 @@ import {
 import { ProofreadReuse } from "./proofread-reuse";
 import { ProviderHttpError, ProviderUncertainError } from "./provider";
 import { providerRetryDelay } from "./retry-policy";
+import { ProductCutoutValidationError } from "./product-cutout";
 const payloadSchema = z.object({ organizationId: z.uuid(), jobId: z.uuid() });
 export async function processAiJob(
   db: Database,
@@ -183,6 +184,12 @@ export async function processAiJob(
         });
         return;
       } catch (error) {
+        if (error instanceof ProductCutoutValidationError) {
+          // The billable response arrived, but its image is known to be unusable.
+          // Keep usage, do not cache/ingest it, and never purchase an automatic retry.
+          await fail(false, error.message);
+          return;
+        }
         const retryDelay =
           error instanceof ProviderHttpError
             ? providerRetryDelay(error.retryAfterMs, attempt)

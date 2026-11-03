@@ -74,7 +74,7 @@ test("search cache inputs retain identity and facts but ignore prices, positions
     }),
   );
   expect(promptVersion("product_image_search")).not.toBe(PROMPT_VERSION);
-  expect(promptVersion("cutout")).toBe(PROMPT_VERSION);
+  expect(promptVersion("brand_prep")).toBe(PROMPT_VERSION);
   expect(() =>
     productImageSearchInputSchema.parse({ code: "", name: "" }),
   ).toThrow();

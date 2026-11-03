@@ -23,6 +23,7 @@ export const imageInputSchema = z.object({
     .transform((value) => value.slice(0, 100))
     .optional(),
   description: z.string().max(20000).optional(),
+  instructions: z.string().trim().max(1000).optional(),
   screenType: z.string().optional(),
   screenInches: z.number().nullable().optional(),
   backgroundContext: z
@@ -81,7 +82,12 @@ export function normalizeAiParams(
     return {
       prompt: input.prompt.trim(),
       ...(input.image ? { image: input.image } : {}),
-      context: input.context === "brochure" ? "brochure" : input.context === "tv" ? "tv" : "social",
+      context:
+        input.context === "brochure"
+          ? "brochure"
+          : input.context === "tv"
+            ? "tv"
+            : "social",
       orientation: ["portrait", "landscape"].includes(input.orientation ?? "")
         ? (input.orientation ?? "square")
         : "square",
@@ -100,5 +106,7 @@ export function normalizeAiParams(
   if (operation === "detect_screen") return { image: input.image };
   if (operation === "placement")
     return { image: input.image, name: input.name ?? "product" };
-  return jsonObject.parse(input);
+  const normalized = jsonObject.parse(input);
+  if (!input.instructions) delete normalized.instructions;
+  return normalized;
 }

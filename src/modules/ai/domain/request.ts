@@ -96,7 +96,9 @@ export function isImageOperation(operation: AiOperation): boolean {
   );
 }
 export const PROMPT_VERSION = "reference-2026-09-image-revision-3-v1";
+export const CUTOUT_PROMPT_VERSION = "transparent-product-cutout-v2";
 export function promptVersion(operation: AiOperation): string {
+  if (operation === "cutout") return CUTOUT_PROMPT_VERSION;
   return operation === "product_image_search"
     ? "exact-product-web-image-v2"
     : PROMPT_VERSION;
