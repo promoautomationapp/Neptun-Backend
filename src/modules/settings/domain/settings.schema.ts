@@ -138,6 +138,7 @@ export const brochureDefaultsSchema = z
       .enum([
         "feature3",
         "tv8",
+        "balanced8",
         "grid6portrait",
         "grid6",
         "grid9",
