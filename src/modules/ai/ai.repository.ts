@@ -55,39 +55,45 @@ export class AiRepository {
       "product_image_search",
     ].includes(request.operation)
       ? input
-      : await this.assets.externalize(
-          actor.organizationId,
-          input,
-          actor.userId,
-        );
+      : request.operation === "cutout"
+        ? await this.cutoutParams(actor, input)
+        : await this.assets.externalize(
+            actor.organizationId,
+            input,
+            actor.userId,
+          );
     delete params.retry;
     delete params.regenerate;
     const assetIds = new Set<string>();
-    const collect = (value: JsonValue): void => {
+    const collect = (value: JsonValue, target: Set<string>): void => {
       if (Array.isArray(value)) {
-        value.forEach(collect);
+        value.forEach((item) => collect(item, target));
         return;
       }
       if (value && typeof value === "object") {
-        Object.values(value).forEach(collect);
+        Object.values(value).forEach((item) => collect(item, target));
         return;
       }
       if (
         typeof value === "string" &&
         /^\/api\/assets\/[a-f0-9-]{36}$/.test(value)
       )
-        assetIds.add(value.slice("/api/assets/".length));
+        target.add(value.slice("/api/assets/".length));
     };
-    collect(params);
+    collect(params, assetIds);
+    const requiredAssetIds = new Set<string>();
+    const requiredParams = { ...params };
+    if (request.operation === "cutout") delete requiredParams.backgroundContext;
+    collect(requiredParams, requiredAssetIds);
     const sourceAssets = assetIds.size
       ? await this.db.query<{ id: string; sha256: string }>(
           "SELECT id,sha256 FROM assets WHERE organization_id=$1 AND id=ANY($2::uuid[]) AND deleted_at IS NULL",
           [actor.organizationId, [...assetIds]],
         )
       : [];
-    if (sourceAssets.length !== assetIds.size)
-      throw new NotFoundException("Source image not found.");
     const byId = new Map(sourceAssets.map((row) => [row.id, row.sha256]));
+    if ([...requiredAssetIds].some((id) => !byId.has(id)))
+      throw new NotFoundException("Source image not found.");
     const convert = (value: JsonValue): JsonValue => {
       if (Array.isArray(value)) return value.map(convert);
       if (value && typeof value === "object")
@@ -276,6 +282,35 @@ export class AiRepository {
         resultId: result.id,
       };
     });
+  }
+  private async cutoutParams(
+    actor: Actor,
+    input: JsonObject,
+  ): Promise<JsonObject> {
+    const { backgroundContext, ...required } = input;
+    // Primary sources remain mandatory, tenant-scoped and authorized. A missing
+    // optional background must never prevent preparing that valid product photo.
+    const params = await this.assets.externalize(
+      actor.organizationId,
+      required,
+      actor.userId,
+    );
+    if (backgroundContext !== undefined) {
+      try {
+        const optional = await this.assets.externalize(
+          actor.organizationId,
+          { backgroundContext },
+          actor.userId,
+        );
+        params.backgroundContext =
+          optional.backgroundContext ?? backgroundContext;
+      } catch {
+        // Retain descriptive identity for signatures/cache. The provider's own
+        // organization-scoped loader will omit any unavailable reference bytes.
+        params.backgroundContext = backgroundContext;
+      }
+    }
+    return params;
   }
   async job(org: string, id: string, actor?: Actor) {
     const row = (

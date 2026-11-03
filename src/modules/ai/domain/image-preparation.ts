@@ -77,9 +77,15 @@ export function productCutoutPrompt(
     knownScreenSizeInches: apple ? null : context.screenInches,
   };
   const background = { ...context.backgroundContext };
-  if (background.image)
-    background.image =
-      "The second supplied reference image is the brochure background.";
+  if (background.image) {
+    if (backgroundReference)
+      background.image =
+        "The second supplied reference image is the brochure background.";
+    else {
+      delete background.image;
+      background.kind = background.color ? "solid" : "none";
+    }
+  }
   const annotation = `Do not add, bake in, or draw any new text, inch ribbon, size badge, arrows, measurement lines or feature graphics in this image. ${apple ? "This is an Apple product: do not add inch annotations anywhere, inside or outside its screen. Preserve any existing manufacturer's screen content and labels." : context.screenType === "television" ? "This is a television. The app separately renders its editable transparent white gradient corner, double border and rotated inch number over the screen; do not draw any of these into the photograph." : context.screenType === "other" ? "This product is NOT a television. The app separately renders its screen-size number, INCH caption and arrows outside the product photograph." : "The app adds all brochure labels separately."} The app separately renders all WiFi, INVERTER and energy-class feature badges, keeping each one editable.`;
   const cleanup =
     "Remove existing clearly added brochure inch numbers, diagonal size ribbons or corner gradients, INCH captions, measurement arrows and floating feature badges such as WiFi, INVERTER or A++/A+++ that have been overlaid on the photo. Restore only the small photographed background or screen area beneath these obvious brochure overlays by matching its immediate surroundings. Preserve real manufacturer logos, physically printed model/feature labels, controls, packaging and actual energy-rating stickers that belong to the photographed product. Do not erase or alter any genuine product detail.";
