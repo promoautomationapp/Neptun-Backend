@@ -33,7 +33,7 @@ test.each([
     await controller[method](request, { retry: true, commandId }, response);
     expect(execute.mock.calls[0]?.[0].request).toMatchObject({
       commandId,
-      regenerate: true,
+      regenerate: method !== "cutout",
     });
     await expect(
       controller[method](request, { retry: true, commandId: "bad" }, response),
@@ -41,6 +41,26 @@ test.each([
     expect(execute).toHaveBeenCalledTimes(1);
   },
 );
+
+test("only explicit cutout regeneration requests a fresh version", async () => {
+  const execute = jest.fn().mockResolvedValue({
+    cached: true,
+    status: "queued",
+    jobId: randomUUID(),
+  });
+  const controller = new AiController(
+    { execute } as unknown as CommandBus,
+    {} as QueryBus,
+  );
+  const request = { actor: {} } as AuthenticatedRequest;
+  const response = { status: jest.fn() } as unknown as Response;
+  const commandId = randomUUID();
+  await controller.cutout(request, { regenerate: true, commandId }, response);
+  expect(execute.mock.calls[0]?.[0].request).toMatchObject({
+    commandId,
+    regenerate: true,
+  });
+});
 
 test("the modern AI endpoint accepts optional UUID command identities only", () => {
   const input = { operation: "background", params: {}, regenerate: true };

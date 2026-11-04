@@ -171,7 +171,9 @@ export class AiController {
       {
         operation,
         params,
-        regenerate: params.retry === true || params.regenerate === true,
+        regenerate:
+          params.regenerate === true ||
+          (operation !== "cutout" && params.retry === true),
         commandId: params.commandId,
       },
       res,

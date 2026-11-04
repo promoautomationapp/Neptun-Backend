@@ -185,9 +185,74 @@ export class AiRepository {
           code: "AI_RESULT_UNCERTAIN",
           resultId: existing.id,
         });
+      if (request.operation === "cutout" && !request.regenerate) {
+        // Explicit retries used nonce keys in older clients. Reopening the
+        // same preparation must reattach to that paid work, without treating
+        // changed instructions or background context as the same request.
+        const identity = `r.organization_id=$1 AND r.operation='cutout'
+          AND r.source_sha256 IS NOT DISTINCT FROM $2::text
+          AND r.model=$3 AND r.quality IS NOT DISTINCT FROM $4::text
+          AND r.prompt_version=$5
+          AND (r.params_json - 'image')=($6::jsonb - 'image')
+          AND ($2::text IS NOT NULL OR r.params_json->'image'=$6::jsonb->'image')`;
+        const values = [
+          actor.organizationId,
+          sourceSha256,
+          model,
+          quality,
+          version,
+          params,
+        ];
+        const reusableJob = (
+          await client.query<AiJobRow>(
+            `SELECT j.* FROM ai_jobs j JOIN ai_results r ON r.organization_id=j.organization_id AND r.id=j.result_id
+             WHERE ${identity} AND j.status IN ('queued','running') ORDER BY j.created_at DESC LIMIT 1`,
+            values,
+          )
+        ).rows[0];
+        if (reusableJob)
+          return {
+            cached: true,
+            status: reusableJob.status,
+            resultId: reusableJob.result_id,
+            jobId: reusableJob.id,
+          };
+        const reusableResult = (
+          await client.query<AiResultRow>(
+            `SELECT r.* FROM ai_results r WHERE ${identity} AND r.status='completed'
+             AND EXISTS(SELECT 1 FROM assets a WHERE a.organization_id=r.organization_id AND a.id=r.output_asset_id AND a.deleted_at IS NULL)
+             ORDER BY r.completed_at DESC LIMIT 1`,
+            values,
+          )
+        ).rows[0];
+        if (reusableResult)
+          return {
+            cached: true,
+            status: "succeeded",
+            resultId: reusableResult.id,
+            result: this.result(reusableResult),
+          };
+        const uncertainResult = (
+          await client.query<AiResultRow>(
+            `SELECT r.* FROM ai_results r WHERE ${identity} AND r.status='uncertain'
+             ORDER BY r.created_at DESC LIMIT 1`,
+            values,
+          )
+        ).rows[0];
+        if (uncertainResult)
+          throw new ConflictException({
+            error:
+              "The provider response was interrupted. Check this job before explicitly regenerating.",
+            code: "AI_RESULT_UNCERTAIN",
+            resultId: uncertainResult.id,
+          });
+      }
       if (existing?.status === "failed")
         throw new ConflictException({
-          error: "This AI request failed. Use Retry to start a new version.",
+          error:
+            request.operation === "cutout"
+              ? "This photo preparation failed. Change the cleanup instructions to request a new version."
+              : "This AI request failed. Use Retry to start a new version.",
           code: "AI_JOB_FAILED",
           resultId: existing.id,
         });
