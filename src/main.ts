@@ -12,6 +12,7 @@ import { browserMetadata } from "./shared/browser-metadata";
 import { Database } from "./database/database";
 import { edgeProxyMiddleware, verifiedClientIp } from "./security/edge-proxy";
 import { apiRateLimitMiddleware } from "./security/request-limits";
+import { apiCachePolicy } from "./security/api-cache-policy";
 import { bodyBudget, accountJsonParser } from "./security/body-budget";
 import type { Server } from "node:http";
 
@@ -24,6 +25,7 @@ async function main(): Promise<void> {
       },
     }),
   );
+  app.use(apiCachePolicy());
   app.use(
     edgeProxyMiddleware({
       secret: env.EDGE_PROXY_SECRET,

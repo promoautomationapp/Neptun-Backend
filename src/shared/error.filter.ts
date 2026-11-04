@@ -8,6 +8,10 @@ import { logger } from "./logger";
 export class ErrorFilter implements ExceptionFilter {
   catch(error: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<Response>();
+    // An image route may have selected immutable caching before a later error.
+    // Never retain that success policy on a failed response.
+    if (!response.headersSent)
+      response.setHeader("Cache-Control", "private, no-store");
     if (error instanceof ZodError) {
       response.status(400).json({
         error: "Invalid request.",
