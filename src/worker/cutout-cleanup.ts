@@ -94,11 +94,11 @@ export async function cleanupRejectedCutouts(
   }
   if (needsContinuation)
     await db.query(
-      "INSERT INTO job_outbox(organization_id,queue,job_key,payload) VALUES($1,'cutout-cleanup',$2,$3)",
+      "INSERT INTO job_outbox(organization_id,queue,job_key,payload) VALUES($1,'asset-variants',$2,$3)",
       [
         organizationId,
         `cutout-cleanup:${organizationId}:${randomUUID()}`,
-        { organizationId },
+        { organizationId, cleanupRejected: true },
       ],
     );
 }

@@ -5,7 +5,6 @@ export const RUNTIME_QUEUES = [
   "catalog-brand-images",
   "catalog-daily",
   "asset-variants",
-  "cutout-cleanup",
   "ai-image",
   "ai-text",
   "__pgboss__send-it",

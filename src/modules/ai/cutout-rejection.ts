@@ -10,7 +10,7 @@ export async function enqueueRejectedCutoutCleanup(
 ): Promise<void> {
   await client.query(
     `INSERT INTO job_outbox(organization_id,queue,job_key,payload)
-     SELECT $1,'cutout-cleanup',$2,jsonb_build_object('organizationId',$1::text)
+     SELECT $1,'asset-variants',$2,jsonb_build_object('organizationId',$1::text,'cleanupRejected',true)
      WHERE EXISTS(SELECT 1 FROM assets a WHERE a.organization_id=$1 AND a.deleted_at IS NULL AND a.kind IN ('cutout','design') AND a.metadata->>'cutoutRejected'='true' AND a.metadata->>'cutoutRemoved' IS DISTINCT FROM 'true' AND ${UNREFERENCED_CUTOUT_SQL})`,
     [organizationId, `cutout-cleanup:${organizationId}:${randomUUID()}`],
   );

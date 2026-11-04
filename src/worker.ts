@@ -97,15 +97,6 @@ async function main(): Promise<void> {
     );
   });
   await boss.createQueue("asset-variants");
-  await boss.createQueue("cutout-cleanup");
-  await boss.work<JsonObject>(
-    "cutout-cleanup",
-    { batchSize: 1 },
-    async (jobs) => {
-      for (const job of jobs)
-        await cleanupRejectedCutouts(db, storage, job.data);
-    },
-  );
   await boss.work<JsonObject>(
     "asset-variants",
     { batchSize: 20, pollingIntervalSeconds: env.QUEUE_POLL_SECONDS },
@@ -114,7 +105,11 @@ async function main(): Promise<void> {
         await Promise.all(
           jobs
             .slice(index, index + 4)
-            .map((job) => generateVariants(db, storage, job.data)),
+            .map((job) =>
+              job.data.cleanupRejected === true
+                ? cleanupRejectedCutouts(db, storage, job.data)
+                : generateVariants(db, storage, job.data),
+            ),
         );
     },
   );
