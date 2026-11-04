@@ -33,6 +33,7 @@ export async function validateProductCutout(bytes: Buffer): Promise<Buffer> {
         .toBuffer();
       let transparent = 0;
       let opaque = 0;
+      let translucent = 0;
       let clearBorder = 0;
       let borderPixels = 0;
       let left = width;
@@ -44,6 +45,7 @@ export async function validateProductCutout(bytes: Buffer): Promise<Buffer> {
           const value = alpha[y * width + x]!;
           if (value === 0) transparent++;
           if (value >= 230) opaque++;
+          else if (value > 0) translucent++;
           if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
             borderPixels++;
             if (value === 0) clearBorder++;
@@ -63,6 +65,10 @@ export async function validateProductCutout(bytes: Buffer): Promise<Buffer> {
         transparent <
           Math.max(4, Math.min(pixels * 0.005, borderPixels * 0.5)) ||
         opaque < Math.max(4, pixels * 0.0001) ||
+        // Wide soft-alpha glows/backdrops can have transparent borders while
+        // still covering the page. Reject them; never erase uncertain pixels
+        // from the product or silently mark the original as a finished cutout.
+        translucent > Math.max(pixels * 0.02, opaque * 0.15) ||
         clearBorder < borderPixels * 0.25 ||
         right < left ||
         bottom < top

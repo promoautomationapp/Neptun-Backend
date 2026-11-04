@@ -228,27 +228,11 @@ export class OpenAiProvider implements AiProvider {
       if (operation === "cutout") {
         const context = productCutoutContext(input);
         metadata = productCutoutMetadata(context);
-        let background: string | null = null;
-        if (
-          context.backgroundContext.kind === "image" &&
-          context.backgroundContext.image
-        ) {
-          try {
-            background = await this.image(context.backgroundContext.image);
-          } catch {
-            // This is optional visual context. The already authorized primary
-            // product must remain preparable if the brochure reference is gone.
-          }
-        }
         body = {
           model,
-          images: [
-            { image_url: source },
-            ...(background ? [{ image_url: background }] : []),
-          ],
+          images: [{ image_url: source }],
           prompt: productCutoutPrompt(context, {
             retry: params.regenerate === true,
-            backgroundReference: Boolean(background),
           }),
           background: "transparent",
           output_format: "png",

@@ -72,3 +72,14 @@ test("an opaque photo with token alpha or only an interior transparent hole is n
       ProductCutoutValidationError,
     );
 });
+
+test("a translucent coloured backdrop with clear outer borders is rejected, not saved as a cutout", async () => {
+  const halo = await png(100, 100, (x, y) => {
+    if (x < 2 || y < 2 || x >= 98 || y >= 98) return clear;
+    if (x >= 30 && x < 70 && y >= 30 && y < 70) return white;
+    return [210, 160, 170, 100];
+  });
+  await expect(validateProductCutout(halo)).rejects.toBeInstanceOf(
+    ProductCutoutValidationError,
+  );
+});
