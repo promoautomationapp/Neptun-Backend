@@ -92,6 +92,10 @@ test.each(["missing", "oversized", "storage-failure"])(
       "gpt-image-2.5-sunburst",
     );
     expect(result.bytes).toEqual(cutout);
+    expect(result.json).toMatchObject({
+      cutoutValidated: true,
+      cutoutValidationVersion: 1,
+    });
     expect(result.json.backgroundSignature).toBe(
       imageBackgroundSignature(context),
     );
@@ -153,15 +157,13 @@ test("GIF provider input is a PNG of only the first frame while the animated ori
   const fetchImpl = providerFetch();
   const provider = new OpenAiProvider(
     {
-      query: jest
-        .fn()
-        .mockResolvedValue([
-          {
-            mime_type: "image/gif",
-            size: gif.length,
-            storage_key: "original.gif",
-          },
-        ]),
+      query: jest.fn().mockResolvedValue([
+        {
+          mime_type: "image/gif",
+          size: gif.length,
+          storage_key: "original.gif",
+        },
+      ]),
     } as unknown as Database,
     { read, put } as unknown as StoragePort,
     actor.organizationId,
@@ -207,10 +209,15 @@ test.each([false, true])(
               operation: "cutout",
               status: "completed",
               output_asset_id: "prepared",
-              output_json: {},
+              output_json: {
+                cutoutValidated: true,
+                cutoutValidationVersion: 1,
+              },
             },
           ]
-        : [],
+        : sql.startsWith("SELECT id FROM assets")
+          ? [{ id: "prepared" }]
+          : [],
     }));
     const db = {
       query,

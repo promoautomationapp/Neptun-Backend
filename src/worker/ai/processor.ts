@@ -144,7 +144,9 @@ export async function processAiJob(
               {
                 kind: result.operation,
                 createdBy: result.created_by ?? undefined,
-                ...(result.operation === "product_image_search"
+                ...(["product_image_search", "cutout"].includes(
+                  result.operation,
+                )
                   ? { metadata: output.json }
                   : {}),
               },

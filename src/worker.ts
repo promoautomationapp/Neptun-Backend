@@ -21,6 +21,7 @@ import { Database } from "./database/database";
 import { LocalStorage } from "./modules/storage/local.storage";
 import { R2Storage } from "./modules/storage/r2.storage";
 import { generateVariants } from "./worker/variants.processor";
+import { cleanupRejectedCutouts } from "./worker/cutout-cleanup";
 import type { JsonObject } from "./shared/json";
 import { recoverInterruptedCatalogJobs } from "./worker/catalog-recovery";
 import { recoverInterruptedAiJobs } from "./worker/ai/recovery";
@@ -96,6 +97,15 @@ async function main(): Promise<void> {
     );
   });
   await boss.createQueue("asset-variants");
+  await boss.createQueue("cutout-cleanup");
+  await boss.work<JsonObject>(
+    "cutout-cleanup",
+    { batchSize: 1 },
+    async (jobs) => {
+      for (const job of jobs)
+        await cleanupRejectedCutouts(db, storage, job.data);
+    },
+  );
   await boss.work<JsonObject>(
     "asset-variants",
     { batchSize: 20, pollingIntervalSeconds: env.QUEUE_POLL_SECONDS },

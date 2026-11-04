@@ -10,6 +10,7 @@ import type { Actor } from "../auth/domain/actor";
 import { NotificationsRepository } from "../notifications/notifications.repository";
 import { requireWorkspaceAccess } from "../auth/domain/workspace-access";
 import { DocumentAssets } from "../assets/document-assets";
+import { lockDocumentAssets } from "../assets/document-asset-locks";
 import {
   campaignSchema,
   postSchema,
@@ -25,6 +26,7 @@ import { applyReview } from "./domain/review";
 import type { ReviewInput } from "./domain/review";
 import type { JsonObject } from "../../shared/json";
 import { databasePrice } from "../../shared/price";
+import { enqueueRejectedCutoutCleanup } from "../ai/cutout-rejection";
 import { applyPostReviewChanges } from "./domain/post-review";
 import {
   privateIdentityQuery,
@@ -88,6 +90,7 @@ export class DocumentsRepository {
         "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
         [`${actor.organizationId}:${kind}:${input.id}`],
       );
+      await lockDocumentAssets(client, actor.organizationId, document);
       const existing = (
         await client.query<DocumentRow>(
           `SELECT id,layout,version,updated_at${kind === "campaign" ? ",status" : ""},deleted_at FROM ${tables[kind]} WHERE organization_id=$1 AND id=$2 FOR UPDATE`,
@@ -208,6 +211,7 @@ export class DocumentsRepository {
           event.input,
           "post",
         );
+      await enqueueRejectedCutoutCleanup(client, actor.organizationId);
       return kind === "campaign"
         ? campaignSchema.parse(document)
         : postSchema.parse(document);

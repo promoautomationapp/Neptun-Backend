@@ -7,6 +7,7 @@ import {
 import sharp from "sharp";
 import { withImageConversion } from "../../security/image-work";
 import { validateProductCutout } from "./product-cutout";
+import { CUTOUT_VALIDATION_VERSION } from "../../modules/ai/domain/cutout-validation";
 import type { Database } from "../../database/database";
 import type { StoragePort } from "../../modules/storage/storage.port";
 import type { AssetRow } from "../../modules/assets/assets.repository";
@@ -504,7 +505,14 @@ export class OpenAiProvider implements AiProvider {
       const base64 = result.data?.[0]?.b64_json;
       if (!base64) throw new ProviderUncertainError();
       let bytes: Buffer = Buffer.from(base64, "base64");
-      if (operation === "cutout") bytes = await validateProductCutout(bytes);
+      if (operation === "cutout") {
+        bytes = await validateProductCutout(bytes);
+        metadata = {
+          ...metadata,
+          cutoutValidated: true,
+          cutoutValidationVersion: CUTOUT_VALIDATION_VERSION,
+        };
+      }
       if (operation === "brand_prep") bytes = await normalizeWhiteLogo(bytes);
       return { bytes, mimeType: "image/png", json: metadata, ...usage };
     }

@@ -1,5 +1,7 @@
 import { normalizeAiParams } from "./domain/params";
 import { reserveBillableAiRequest } from "../../security/request-limits";
+import { validatedCutoutResult } from "./domain/cutout-validation";
+import { rejectSavedCutout } from "./cutout-rejection";
 import { findExactCatalogPhoto } from "./exact-catalog-photo";
 import {
   productImageSearchInputSchema,
@@ -158,13 +160,29 @@ export class AiRepository {
           [actor.organizationId, key],
         )
       ).rows[0];
-      if (existing?.status === "completed")
+      if (existing?.status === "completed") {
+        if (existing.operation === "cutout") {
+          const available = validatedCutoutResult(existing)
+            ? await client.query(
+                "SELECT id FROM assets WHERE organization_id=$1 AND id=$2 AND deleted_at IS NULL AND metadata->>'cutoutRejected' IS DISTINCT FROM 'true'",
+                [actor.organizationId, existing.output_asset_id],
+              )
+            : null;
+          if (!available?.rows.length)
+            throw new ConflictException({
+              error:
+                "This saved photo is not a validated cutout. Use Remove background again to prepare a new version.",
+              code: "AI_CUTOUT_NOT_VALIDATED",
+              resultId: existing.id,
+            });
+        }
         return {
           cached: true,
           status: "succeeded",
           resultId: existing.id,
           result: this.result(existing),
         };
+      }
       const active = (
         await client.query<AiJobRow>(
           "SELECT * FROM ai_jobs WHERE organization_id=$1 AND cache_key=$2 AND status IN ('queued','running') ORDER BY created_at DESC LIMIT 1",
@@ -220,12 +238,14 @@ export class AiRepository {
         const reusableResult = (
           await client.query<AiResultRow>(
             `SELECT r.* FROM ai_results r WHERE ${identity} AND r.status='completed'
-             AND EXISTS(SELECT 1 FROM assets a WHERE a.organization_id=r.organization_id AND a.id=r.output_asset_id AND a.deleted_at IS NULL)
+             AND r.output_json @> '{"cutoutValidated":true,"cutoutValidationVersion":1}'::jsonb
+             AND r.output_json->>'cutoutRejected' IS DISTINCT FROM 'true'
+             AND EXISTS(SELECT 1 FROM assets a WHERE a.organization_id=r.organization_id AND a.id=r.output_asset_id AND a.deleted_at IS NULL AND a.metadata->>'cutoutRejected' IS DISTINCT FROM 'true')
              ORDER BY r.completed_at DESC LIMIT 1`,
             values,
           )
         ).rows[0];
-        if (reusableResult)
+        if (reusableResult && validatedCutoutResult(reusableResult))
           return {
             cached: true,
             status: "succeeded",
@@ -251,7 +271,7 @@ export class AiRepository {
         throw new ConflictException({
           error:
             request.operation === "cutout"
-              ? "This photo preparation failed. Change the cleanup instructions to request a new version."
+              ? "This photo preparation failed. Use Remove background again to request a new version."
               : "This AI request failed. Use Retry to start a new version.",
           code: "AI_JOB_FAILED",
           resultId: existing.id,
@@ -295,6 +315,13 @@ export class AiRepository {
           "Add OPENAI_API_KEY to the backend environment first. Saved results remain available.",
         );
       await reserveBillableAiRequest(client, actor.organizationId);
+      if (request.operation === "cutout" && request.regenerate)
+        await rejectSavedCutout(
+          client,
+          actor.organizationId,
+          request.params.rejectedImage,
+          params.image,
+        );
       if (request.operation === "lifestyle")
         await this.lifestyle.reserveAttempt(client, actor.organizationId);
       const result = (
@@ -393,12 +420,32 @@ export class AiRepository {
     )[0];
     if (actor && result)
       requireSocialContextAccess(actor, result.params_json.context);
+    const invalidCutout =
+      result?.operation === "cutout" &&
+      result.status === "completed" &&
+      !validatedCutoutResult(result);
+    const unavailableCutout =
+      result?.operation === "cutout" &&
+      result.status === "completed" &&
+      !invalidCutout &&
+      !(
+        await this.db.query(
+          "SELECT id FROM assets WHERE organization_id=$1 AND id=$2 AND deleted_at IS NULL AND metadata->>'cutoutRejected' IS DISTINCT FROM 'true'",
+          [org, result.output_asset_id],
+        )
+      ).length;
+    const rejectedCutout =
+      result?.operation === "cutout" &&
+      result.output_json?.cutoutRejected === true;
+    const invalid = invalidCutout || unavailableCutout || rejectedCutout;
     return {
       jobId: row.id,
       resultId: row.result_id,
-      status: row.status,
+      status: invalid ? "failed" : row.status,
       attempts: row.attempts,
-      error: row.last_error,
+      error: invalid
+        ? "This saved photo is not a validated cutout. Use Remove background again to prepare a new version."
+        : row.last_error,
       createdAt: row.created_at,
       startedAt: row.started_at,
       finishedAt: row.finished_at,
@@ -416,7 +463,8 @@ export class AiRepository {
           : row.status === "running"
             ? "preparing"
             : "finished",
-      result: result?.status === "completed" ? this.result(result) : null,
+      result:
+        result?.status === "completed" && !invalid ? this.result(result) : null,
     };
   }
   async usage(org: string, month: string) {

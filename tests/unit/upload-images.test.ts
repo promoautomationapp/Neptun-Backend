@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { BadRequestException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import sharp from "sharp";
+import type { PoolClient } from "pg";
 import type { Database } from "../../src/database/database";
 import type { AuthenticatedRequest } from "../../src/modules/auth/domain/actor";
 import type { StoragePort } from "../../src/modules/storage/storage.port";
@@ -16,10 +17,12 @@ const svg = Buffer.from(
 const actor = { organizationId: randomUUID(), userId: randomUUID() };
 const request = { actor } as AuthenticatedRequest;
 
-function assetStore() {
+function assetStore({ revived = false } = {}) {
   const id = randomUUID();
   const files = new Map<string, { bytes: Buffer; mimeType: string }>();
   const query = jest.fn(async (sql: string, values: unknown[]) => {
+    if (sql.startsWith("SELECT deleted_at FROM assets"))
+      return revived ? [{ deleted_at: new Date() }] : [];
     if (sql.startsWith("INSERT INTO assets"))
       return [
         {
@@ -53,7 +56,21 @@ function assetStore() {
     signedRead: async () => null,
     signedUpload: async () => null,
   };
-  return { id, query, files, storage, db: { query } as unknown as Database };
+  return {
+    id,
+    query,
+    files,
+    storage,
+    db: {
+      query,
+      transaction: async (work: (client: PoolClient) => Promise<unknown>) =>
+        work({
+          query: async (sql: string, values: unknown[]) => ({
+            rows: await query(sql, values),
+          }),
+        } as unknown as PoolClient),
+    } as unknown as Database,
+  };
 }
 
 async function transparentAvif() {
@@ -77,6 +94,33 @@ async function transparentAvif() {
 }
 
 describe("uploaded SVG and AVIF images", () => {
+  test("locks content-addressed storage before inspection and gives revived assets fresh variant work", async () => {
+    const store = assetStore({ revived: true });
+    const exists = jest
+      .spyOn(store.storage, "exists")
+      .mockImplementation(async () => {
+        expect(store.query.mock.calls[0]?.[0]).toContain(
+          "pg_advisory_xact_lock",
+        );
+        return false;
+      });
+    await ingestAsset(
+      store.db,
+      store.storage,
+      actor.organizationId,
+      await sharp(svg).png().toBuffer(),
+      "image/png",
+    );
+    expect(exists).toHaveBeenCalledTimes(1);
+    const variants = store.query.mock.calls.find(([sql]) =>
+      sql.startsWith("INSERT INTO job_outbox"),
+    );
+    expect(variants?.[1][1]).toMatch(
+      new RegExp(
+        `^variants:${actor.organizationId}:${store.id}:1:[a-f0-9-]{36}$`,
+      ),
+    );
+  });
   test.each(["image/svg+xml", "image/avif"])(
     "accepts %s upload intent while preserving source-size and file-type limits",
     async (mimeType) => {

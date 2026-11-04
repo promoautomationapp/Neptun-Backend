@@ -37,12 +37,16 @@ function repository({
   nonceActive = false,
   paidAvailable = true,
   nonceUncertain = false,
+  validated = true,
+  available = true,
 }: {
-  exactStatus?: "failed" | "uncertain";
+  exactStatus?: "failed" | "uncertain" | "completed";
   exactActive?: boolean;
   nonceActive?: boolean;
   paidAvailable?: boolean;
   nonceUncertain?: boolean;
+  validated?: boolean;
+  available?: boolean;
 } = {}) {
   const paid = {
     id: "previous-paid-result",
@@ -51,7 +55,12 @@ function repository({
     source_sha256: sourceHash,
     params_json: params,
     output_asset_id: outputId,
-    output_json: { preparationRevision: 3 },
+    output_json: {
+      preparationRevision: 3,
+      ...(validated
+        ? { cutoutValidated: true, cutoutValidationVersion: 1 }
+        : {}),
+    },
   };
   const active = {
     id: "previous-paid-job",
@@ -67,6 +76,8 @@ function repository({
       rows = [{ ...paid, status: exactStatus }];
     else if (sql.startsWith("SELECT * FROM ai_jobs") && exactActive)
       rows = [active];
+    else if (sql.startsWith("SELECT id FROM assets") && available)
+      rows = [{ id: outputId }];
     else if (sql.startsWith("SELECT j.*") || sql.startsWith("SELECT r.*")) {
       const candidate = { ...(values[5] as JsonObject) };
       const saved = { ...paid.params_json };
@@ -182,7 +193,7 @@ test("a failed preparation without reusable paid output cannot silently purchase
   ).rejects.toMatchObject({
     response: {
       code: "AI_JOB_FAILED",
-      error: expect.stringContaining("Change the cleanup instructions"),
+      error: expect.stringContaining("Use Remove background again"),
     },
   });
   expect(
@@ -238,5 +249,40 @@ test("explicit regeneration bypasses reusable older results without calling a pr
     transactionQuery.mock.calls.some(
       ([sql]) => sql.startsWith("SELECT r.*") || sql.startsWith("SELECT j.*"),
     ),
+  ).toBe(false);
+});
+
+test.each([
+  { validated: false, available: true },
+  { validated: true, available: false },
+])(
+  "an unvalidated or deleted exact result cannot masquerade as a completed cutout (%p)",
+  async (options) => {
+    const { repo, transactionQuery } = repository({
+      exactStatus: "completed",
+      ...options,
+    });
+    await expect(
+      repo.enqueue(actor, { operation: "cutout", params, regenerate: false }),
+    ).rejects.toMatchObject({
+      response: { code: "AI_CUTOUT_NOT_VALIDATED" },
+    });
+    expect(
+      transactionQuery.mock.calls.some(([sql]) => sql.startsWith("INSERT")),
+    ).toBe(false);
+  },
+);
+
+test("a validated, available exact result is reused without another paid job", async () => {
+  const { repo, transactionQuery } = repository({ exactStatus: "completed" });
+  await expect(
+    repo.enqueue(actor, { operation: "cutout", params, regenerate: false }),
+  ).resolves.toMatchObject({
+    cached: true,
+    status: "succeeded",
+    result: { cutoutValidated: true },
+  });
+  expect(
+    transactionQuery.mock.calls.some(([sql]) => sql.startsWith("INSERT")),
   ).toBe(false);
 });

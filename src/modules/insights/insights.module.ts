@@ -221,7 +221,7 @@ export class InsightsRepository {
       [org],
     );
     const prepared = await this.db.query<{ operation: string; count: string }>(
-      "SELECT r.operation,count(DISTINCT r.output_asset_id)::text count FROM ai_results r JOIN assets a ON a.organization_id=r.organization_id AND a.id=r.output_asset_id AND a.deleted_at IS NULL WHERE r.organization_id=$1 AND r.status='completed' GROUP BY r.operation",
+      "SELECT r.operation,count(DISTINCT r.output_asset_id)::text count FROM ai_results r JOIN assets a ON a.organization_id=r.organization_id AND a.id=r.output_asset_id AND a.deleted_at IS NULL WHERE r.organization_id=$1 AND r.status='completed' AND (r.operation<>'cutout' OR (r.output_json @> '{\"cutoutValidated\":true,\"cutoutValidationVersion\":1}'::jsonb AND r.output_json->>'cutoutRejected' IS DISTINCT FROM 'true')) GROUP BY r.operation",
       [org],
     );
     const [linked] = await this.db.query<{

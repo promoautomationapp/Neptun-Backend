@@ -3,6 +3,7 @@ import { Database } from "../../database/database";
 import { resolveSettings } from "./domain/settings.schema";
 import type { WorkspaceSettings } from "./domain/settings.schema";
 import type { JsonObject } from "../../shared/json";
+import { lockDocumentAssets } from "../assets/document-asset-locks";
 export interface SettingsSnapshot {
   settings: WorkspaceSettings | null;
   version: number;
@@ -40,6 +41,11 @@ export class SettingsRepository {
       await client.query(
         "SELECT id FROM organizations WHERE id=$1 FOR UPDATE",
         [organizationId],
+      );
+      await lockDocumentAssets(
+        client,
+        organizationId,
+        value as unknown as JsonObject,
       );
       const current = await client.query<{ version: number }>(
         "SELECT version FROM settings WHERE organization_id=$1",
