@@ -11,8 +11,13 @@ import type { ProductImageSearchInput } from "../../modules/ai/domain/product-im
 import type { JsonObject } from "../../shared/json";
 import { downloadPublic, publicHttpsUrl } from "./public-download";
 
-const missing = (reason: string) => ({
-  json: { found: false, reason } as JsonObject,
+const missing = (reason: string, retryable = false) => ({
+  json: {
+    found: false,
+    reason,
+    searchOutcome: retryable ? "verification_unavailable" : "not_found",
+    ...(retryable ? { retryable: true } : {}),
+  } as JsonObject,
 });
 function decodeHtml(value: string): string {
   return value
@@ -187,6 +192,7 @@ async function verifyCandidate(
   if (!parsed.success)
     return missing(
       "No verifiable exact product photo was found. Upload your own image.",
+      true,
     );
   const candidate = parsed.data;
   if (!candidate.found)
@@ -225,6 +231,7 @@ async function verifyCandidate(
     if (!["text/html", "application/xhtml+xml"].includes(page.mimeType))
       return missing(
         "The product page could not be read. Upload your own image.",
+        true,
       );
     const html = decodeHtml(page.bytes.toString("utf8"));
     const model = productIdentityText(candidate.matchedModel);
@@ -273,6 +280,7 @@ async function verifyCandidate(
   } catch {
     return missing(
       "The exact photo could not be safely downloaded. Upload your own image.",
+      true,
     );
   }
 }
@@ -294,6 +302,7 @@ export async function verifyProductImage(
       : [];
   let last = await verifyCandidate(input, output, consultedUrls, download);
   if (last.json.found) return last;
+  let retryable = last.json.retryable === true;
   for (const candidate of alternatives) {
     const next = await verifyCandidate(
       input,
@@ -302,7 +311,15 @@ export async function verifyProductImage(
       download,
     );
     if (next.json.found) return next;
+    retryable ||= next.json.retryable === true;
     last = next;
   }
-  return last;
+  return retryable
+    ? missing(
+        String(
+          last.json.reason || "Photo verification is temporarily unavailable.",
+        ),
+        true,
+      )
+    : last;
 }

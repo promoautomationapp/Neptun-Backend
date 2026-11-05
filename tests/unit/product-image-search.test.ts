@@ -607,6 +607,7 @@ test("a clean no-match response completes without contacting any photo server", 
   expect(result.json).toEqual({
     found: false,
     reason: "No exact model available.",
+    searchOutcome: "not_found",
   });
   expect(download).not.toHaveBeenCalled();
 });

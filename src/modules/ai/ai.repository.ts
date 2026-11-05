@@ -1,3 +1,10 @@
+import type { QueryResultRow } from "pg";
+import {
+  negativeCacheEpoch,
+  searchReuseHistory,
+  guardCutoutCooldown,
+  reusableScreenGeometry,
+} from "./ai-reuse-policy";
 import { findReusableCutouts, type CutoutReuseItem } from "./cutout-reuse";
 import { normalizeAiParams } from "./domain/params";
 import { reserveBillableAiRequest } from "../../security/request-limits";
@@ -128,20 +135,43 @@ export class AiRepository {
           : env.OPENAI_TEXT_MODEL;
     const version = promptVersion(request.operation);
     const quality = image ? "high" : null;
-    const key = cacheKey({
+    const regenerate =
+      request.regenerate &&
+      !["product_image_search", "detect_screen"].includes(request.operation);
+    const primarySha =
+      typeof params.image === "string" &&
+      params.image.startsWith("/api/assets/")
+        ? byId.get(params.image.slice("/api/assets/".length))
+        : undefined;
+    const canonicalSource = primarySha ? `sha256:${primarySha}` : params.image;
+    // One ordinary source+cleanup request across campaigns, regardless of page design.
+    let key = cacheKey({
       organizationId: actor.organizationId,
       operation: request.operation,
-      sourceSha256,
+      sourceSha256:
+        request.operation === "cutout" ? (primarySha ?? null) : sourceSha256,
       params:
-        request.operation === "product_image_search"
-          ? productImageSearchCacheIdentity(
-              productImageSearchInputSchema.parse(normalized),
-            )
-          : normalized,
+        request.operation === "cutout"
+          ? {
+              image: canonicalSource ?? "",
+              instructions: String(params.instructions || "").trim(),
+            }
+          : request.operation === "product_image_search"
+            ? {
+                ...productImageSearchCacheIdentity(
+                  productImageSearchInputSchema.parse(normalized),
+                ),
+                sourceUrl: String(params.sourceUrl || ""),
+              }
+            : normalized,
       model,
       quality,
       promptVersion: version,
-      ...(request.regenerate
+      ...(!regenerate &&
+      ["cutout", "product_image_search"].includes(request.operation)
+        ? { nonce: `reuse-window:${negativeCacheEpoch()}` }
+        : {}),
+      ...(regenerate
         ? {
             // A transport retry of the same explicit action must reattach to
             // its durable job rather than purchase another provider request.
@@ -160,6 +190,94 @@ export class AiRepository {
         "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
         [`${actor.organizationId}:ai:${key}`],
       );
+      const readDb = {
+        query: async <T extends QueryResultRow>(
+          sql: string,
+          values: readonly unknown[] = [],
+        ) => (await client.query<T>(sql, [...values])).rows,
+      };
+      if (request.operation === "product_image_search") {
+        const history = await searchReuseHistory(
+          readDb,
+          actor.organizationId,
+          params,
+        );
+        if (history.success)
+          return {
+            cached: true,
+            status: "succeeded",
+            resultId: history.success.id,
+            result: this.result(history.success),
+          };
+        if (history.negative)
+          return {
+            cached: true,
+            status: "succeeded",
+            resultId: history.negative.id,
+            result: {
+              ...this.result(history.negative),
+              negativeCached: true,
+              searchOutcome: "not_found",
+              cooldownUntil: new Date(history.until!).toISOString(),
+              retryAfterSeconds: Math.ceil(
+                (history.until! - Date.now()) / 1000,
+              ),
+            },
+          };
+        // A transient verification failure is not a no-match. Its next safe attempt
+        // uses a fresh durable key, while concurrent retries still share that key.
+        if (history.transient) {
+          const transientKey = cacheKey({
+            organizationId: actor.organizationId,
+            operation: request.operation,
+            sourceSha256,
+            params: {
+              ...productImageSearchCacheIdentity(
+                productImageSearchInputSchema.parse(normalized),
+              ),
+              sourceUrl: String(params.sourceUrl || ""),
+            },
+            model,
+            quality,
+            promptVersion: version,
+            nonce: `after-verification:${history.transient.id}`,
+          });
+          key = transientKey;
+          await client.query(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+            [`${actor.organizationId}:ai:${key}`],
+          );
+        }
+      }
+      if (request.operation === "cutout" && !regenerate) {
+        const reusable = await findReusableCutouts(
+          readDb,
+          actor.organizationId,
+          [{ key: "source", ...params } as CutoutReuseItem],
+        );
+        if (reusable[0])
+          return {
+            cached: true,
+            status: "succeeded",
+            resultId: reusable[0].resultId,
+            result: reusable[0].result,
+          };
+        await guardCutoutCooldown(readDb, actor.organizationId, params);
+      }
+      if (request.operation === "detect_screen") {
+        const geometry = await reusableScreenGeometry(
+          readDb,
+          actor.organizationId,
+          params,
+        );
+        if (geometry)
+          return {
+            cached: true,
+            status: "succeeded",
+            resultId: geometry.id,
+            result: this.result(geometry),
+          };
+      }
       const existing = (
         await client.query<AiResultRow>(
           "SELECT * FROM ai_results WHERE organization_id=$1 AND cache_key=$2 FOR UPDATE",
@@ -357,7 +475,7 @@ export class AiRepository {
             {
               operation: request.operation,
               params,
-              regenerate: request.regenerate,
+              regenerate,
             },
             actor.userId,
           ],

@@ -1,3 +1,8 @@
+import type { JsonObject } from "../../shared/json";
+import {
+  AI_NEGATIVE_CACHE_SECONDS,
+  stableSearchMiss,
+} from "../../modules/ai/ai-reuse-policy";
 import { z } from "zod";
 import type { Database } from "../../database/database";
 import type { StoragePort } from "../../modules/storage/storage.port";
@@ -65,8 +70,12 @@ export async function processAiJob(
   )[0];
   if (!result) throw new Error("AI result missing.");
   let usageRecorded = false;
+  let providerResponseSeen = false;
   const recordUsage = async (usage: ProviderUsage) => {
     if (usageRecorded) return;
+    // A database outage while recording usage is still an ambiguous billable
+    // provider response. Never classify it as safe to purchase automatically again.
+    providerResponseSeen = true;
     const cost =
       usage.costUsd ??
       estimateAiCost(result.model, result.operation, usage).costUsd;
@@ -89,7 +98,11 @@ export async function processAiJob(
     usageRecorded = true;
   };
   let reuse: ProofreadReuse | null = null;
-  const fail = async (uncertain: boolean, message: string) => {
+  const fail = async (
+    uncertain: boolean,
+    message: string,
+    metadata: JsonObject = {},
+  ) => {
     await db.transaction(async (client) => {
       const changed = await client.query(
         "UPDATE ai_jobs SET status=$3,last_error=$4,finished_at=now() WHERE organization_id=$1 AND id=$2 AND status IN ('queued','running') RETURNING id",
@@ -97,8 +110,8 @@ export async function processAiJob(
       );
       if (changed.rowCount)
         await client.query(
-          "UPDATE ai_results SET status=$3 WHERE organization_id=$1 AND id=$2 AND status='pending'",
-          [org, result.id, uncertain ? "uncertain" : "failed"],
+          "UPDATE ai_results SET status=$3,output_json=coalesce(output_json,'{}'::jsonb) || $4::jsonb WHERE organization_id=$1 AND id=$2 AND status='pending'",
+          [org, result.id, uncertain ? "uncertain" : "failed", metadata],
         );
     });
     await reuse?.fail(uncertain);
@@ -134,6 +147,19 @@ export async function processAiJob(
         if (providerCalled) await recordUsage(output);
         if (reuse && plan && providerCalled)
           output.json = await reuse.complete(plan.missing, output);
+        if (
+          result.operation === "product_image_search" &&
+          stableSearchMiss({ ...result, output_json: output.json })
+        ) {
+          output.json = {
+            ...output.json,
+            searchOutcome: "not_found",
+            cooldownUntil: new Date(
+              Date.now() + AI_NEGATIVE_CACHE_SECONDS * 1000,
+            ).toISOString(),
+            retryAfterSeconds: AI_NEGATIVE_CACHE_SECONDS,
+          };
+        }
         const asset = output.bytes
           ? await ingestAsset(
               db,
@@ -189,7 +215,7 @@ export async function processAiJob(
         if (error instanceof ProductCutoutValidationError) {
           // The billable response arrived, but its image is known to be unusable.
           // Keep usage, do not cache/ingest it, and never purchase an automatic retry.
-          await fail(false, error.message);
+          await fail(false, error.message, { failureCode: "CUTOUT_INVALID" });
           return;
         }
         const retryDelay =
@@ -212,6 +238,7 @@ export async function processAiJob(
         const uncertain =
           providerSucceeded ||
           usageRecorded ||
+          providerResponseSeen ||
           error instanceof ProviderUncertainError;
         const message = uncertain
           ? "The provider response or result persistence was interrupted. Review before regenerating."
@@ -228,7 +255,9 @@ export async function processAiJob(
     );
   } catch (error) {
     await fail(
-      usageRecorded || error instanceof ProviderUncertainError,
+      usageRecorded ||
+        providerResponseSeen ||
+        error instanceof ProviderUncertainError,
       "Preparation was interrupted. Review the result before explicitly retrying.",
     );
   } finally {
