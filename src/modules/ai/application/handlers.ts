@@ -1,3 +1,4 @@
+import type { CutoutReuseItem } from "../cutout-reuse";
 import { Inject } from "@nestjs/common";
 import { Command, CommandHandler, Query, QueryHandler } from "@nestjs/cqrs";
 import type { ICommandHandler, IQueryHandler } from "@nestjs/cqrs";
@@ -18,6 +19,23 @@ export class EnqueueAiHandler implements ICommandHandler<EnqueueAiCommand> {
   constructor(@Inject(AiRepository) private readonly repo: AiRepository) {}
   execute(command: EnqueueAiCommand) {
     return this.repo.enqueue(command.actor, command.request);
+  }
+}
+export class GetReusableCutoutsQuery extends Query<
+  Awaited<ReturnType<AiRepository["reuseCutouts"]>>
+> {
+  constructor(
+    readonly actor: Actor,
+    readonly items: CutoutReuseItem[],
+  ) {
+    super();
+  }
+}
+@QueryHandler(GetReusableCutoutsQuery)
+export class GetReusableCutoutsHandler implements IQueryHandler<GetReusableCutoutsQuery> {
+  constructor(@Inject(AiRepository) private readonly repo: AiRepository) {}
+  execute(query: GetReusableCutoutsQuery) {
+    return this.repo.reuseCutouts(query.actor, query.items);
   }
 }
 export class GetAiJobQuery extends Query<
@@ -105,6 +123,7 @@ export class AcceptLifestyleHandler implements ICommandHandler<AcceptLifestyleCo
 }
 export const aiHandlers = [
   EnqueueAiHandler,
+  GetReusableCutoutsHandler,
   GetAiJobHandler,
   GetAiUsageHandler,
   GetBrandLogosHandler,

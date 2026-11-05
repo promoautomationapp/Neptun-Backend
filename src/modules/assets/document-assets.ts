@@ -6,7 +6,7 @@ import type { StoragePort } from "../storage/storage.port";
 import type { JsonValue, JsonObject } from "../../shared/json";
 import { ingestAsset, assetUrl } from "./asset-ingest";
 import { embeddedImageInput } from "./image-input";
-function sourceReference(
+export function sourceReference(
   value: string,
 ): { id?: string; alias?: string } | null {
   let path = value;

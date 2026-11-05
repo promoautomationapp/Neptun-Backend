@@ -1,3 +1,4 @@
+import { findReusableCutouts, type CutoutReuseItem } from "./cutout-reuse";
 import { normalizeAiParams } from "./domain/params";
 import { reserveBillableAiRequest } from "../../security/request-limits";
 import { validatedCutoutResult } from "./domain/cutout-validation";
@@ -44,6 +45,11 @@ export class AiRepository {
     @Inject(LifestyleRepository)
     private readonly lifestyle: LifestyleRepository,
   ) {}
+  async reuseCutouts(actor: Actor, items: CutoutReuseItem[]) {
+    return {
+      items: await findReusableCutouts(this.db, actor.organizationId, items),
+    };
+  }
   async enqueue(actor: Actor, request: AiRequest): Promise<AiTicket> {
     const input = normalizeAiParams(request.operation, request.params);
     requireSocialContextAccess(actor, input.context);

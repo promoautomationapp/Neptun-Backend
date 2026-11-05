@@ -18,12 +18,14 @@ import { env } from "../../config/environment";
 import { jsonObject } from "../../shared/json";
 import type { AuthenticatedRequest } from "../auth/domain/actor";
 import { DocumentAssets } from "../assets/document-assets";
+import { cutoutReuseInputSchema } from "./cutout-reuse";
 import { AiRepository } from "./ai.repository";
 import { LifestyleRepository } from "./lifestyle.repository";
 import { aiRequestSchema, belgradeMonth } from "./domain/request";
 import type { AiOperation } from "./domain/request";
 import {
   EnqueueAiCommand,
+  GetReusableCutoutsQuery,
   GetAiJobQuery,
   GetAiUsageQuery,
   GetBrandLogosQuery,
@@ -39,6 +41,13 @@ export class AiController {
   ) {}
   @Get("ai-status") status() {
     return { configured: Boolean(env.OPENAI_API_KEY) };
+  }
+  @Post("ai/cutouts/reuse") reuseCutouts(
+    @Req() req: AuthenticatedRequest,
+    @Body() body: unknown,
+  ) {
+    const { items } = cutoutReuseInputSchema.parse(body);
+    return this.queries.execute(new GetReusableCutoutsQuery(req.actor, items));
   }
   @Post("ai/jobs") async enqueue(
     @Req() req: AuthenticatedRequest,
