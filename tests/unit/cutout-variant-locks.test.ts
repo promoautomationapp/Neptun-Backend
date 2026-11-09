@@ -4,6 +4,7 @@ import type { PoolClient } from "pg";
 import type { StoragePort } from "../../src/modules/storage/storage.port";
 import { ingestAsset } from "../../src/modules/assets/asset-ingest";
 import { generateVariants } from "../../src/worker/variants.processor";
+import { withImageConversion } from "../../src/security/image-work";
 
 jest.mock("../../src/modules/assets/asset-ingest", () => ({
   ingestAsset: jest.fn(async () => ({
@@ -39,6 +40,7 @@ async function variantFixture(available: boolean) {
             storage_key: storageKey,
             mime_type: "image/png",
             metadata: {},
+            size: bytes.length,
           },
         ];
       // Prepare one missing derivative; the other already exists.
@@ -66,6 +68,51 @@ async function variantFixture(available: boolean) {
 }
 
 beforeEach(() => jest.clearAllMocks());
+
+test("variant jobs wait for native capacity before reading an original", async () => {
+  const fixture = await variantFixture(true);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const occupying = withImageConversion(() => gate);
+  const pending = generateVariants(fixture.db, fixture.storage, {
+    organizationId,
+    assetId,
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(fixture.storage.read).not.toHaveBeenCalled();
+  release();
+  await occupying;
+  await pending;
+  expect(fixture.storage.read).toHaveBeenCalledWith(
+    storageKey,
+    expect.any(Number),
+  );
+});
+
+test.each([0, 33 * 1024 * 1024, "invalid"])(
+  "invalid source size %s cannot initiate a storage read",
+  async (size) => {
+    const fixture = await variantFixture(true);
+    (fixture.db.query as jest.Mock).mockResolvedValueOnce([
+      {
+        id: assetId,
+        storage_key: storageKey,
+        mime_type: "image/png",
+        metadata: {},
+        size,
+      },
+    ]);
+    await expect(
+      generateVariants(fixture.db, fixture.storage, {
+        organizationId,
+        assetId,
+      }),
+    ).rejects.toThrow();
+    expect(fixture.storage.read).not.toHaveBeenCalled();
+  },
+);
 
 test("derivatives use the same sorted key locks as cleanup and retain them through registration", async () => {
   const fixture = await variantFixture(true);

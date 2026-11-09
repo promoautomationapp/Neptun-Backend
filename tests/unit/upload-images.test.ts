@@ -94,6 +94,14 @@ async function transparentAvif() {
 }
 
 describe("uploaded SVG and AVIF images", () => {
+  test("rejects huge vector rasterization before it allocates the PNG pixels", async () => {
+    const huge = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="8000" height="4000"><rect width="8000" height="4000" fill="red"/></svg>',
+    );
+    await expect(canonicalAssetInput(huge, "image/svg+xml")).rejects.toThrow(
+      "16 megapixels",
+    );
+  });
   test("locks content-addressed storage before inspection and gives revived assets fresh variant work", async () => {
     const store = assetStore({ revived: true });
     const exists = jest

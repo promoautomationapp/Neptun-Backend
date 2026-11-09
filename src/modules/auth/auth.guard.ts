@@ -10,6 +10,7 @@ import { Reflector } from "@nestjs/core";
 import { AuthRepository } from "./auth.repository";
 import type { AuthenticatedRequest } from "./domain/actor";
 import { env } from "../../config/environment";
+import { admittedBodyActor } from "../../security/body-auth";
 
 export const COOKIE = env.SESSION_COOKIE_NAME;
 export const Public = () => SetMetadata("public", true);
@@ -50,7 +51,9 @@ export class AuthGuard implements CanActivate {
       ])
     )
       return true;
-    const actor = await this.repository.session(sessionToken(request));
+    const actor =
+      admittedBodyActor(request) ??
+      (await this.repository.session(sessionToken(request)));
     if (!actor) throw new UnauthorizedException("Sign in to continue.");
     if (
       actor.mustChangePassword &&

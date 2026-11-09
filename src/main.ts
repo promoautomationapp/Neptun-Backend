@@ -15,8 +15,15 @@ import { apiRateLimitMiddleware } from "./security/request-limits";
 import { apiCachePolicy } from "./security/api-cache-policy";
 import { bodyBudget, accountJsonParser } from "./security/body-budget";
 import type { Server } from "node:http";
+import { configureImageRuntime } from "./shared/image-runtime";
+import { startMemoryTelemetry } from "./shared/memory-telemetry";
+import { authenticatedBodyAdmission } from "./security/body-auth";
+import { AuthRepository } from "./modules/auth/auth.repository";
+import { sessionToken } from "./modules/auth/auth.guard";
 
 async function main(): Promise<void> {
+  configureImageRuntime();
+  startMemoryTelemetry("api");
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.use(
     helmet({
@@ -33,6 +40,11 @@ async function main(): Promise<void> {
     }),
   );
   app.use(apiRateLimitMiddleware(app.get(Database), verifiedClientIp));
+  app.use(
+    authenticatedBodyAdmission((request) =>
+      app.get(AuthRepository).session(sessionToken(request)),
+    ),
+  );
   app.use(bodyBudget());
   app.use(accountJsonParser());
   app.use(

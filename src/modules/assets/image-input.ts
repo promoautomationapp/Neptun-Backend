@@ -15,6 +15,9 @@ export const UPLOAD_IMAGE_TYPES = [
   "image/avif",
 ] as const;
 const MAX_IMAGE_PIXELS = 67_000_000;
+// Unlike storing an existing raster, canonicalizing SVG/AVIF materializes PNG
+// pixels in the API process. Keep that native working set within the small host.
+const MAX_CONVERSION_PIXELS = 16_000_000;
 
 // SVG scripts and references are never served as uploaded active content.
 // AVIF shares the same portable PNG path, retaining its alpha channel.
@@ -53,6 +56,10 @@ export async function canonicalAssetInput(bytes: Buffer, mimeType: string) {
       "Image MIME type does not match the file contents.",
     );
   if (mimeType === "image/svg+xml" || mimeType === "image/avif") {
+    if (details.width! * details.height! > MAX_CONVERSION_PIXELS)
+      throw new BadRequestException(
+        "This image is too large to convert safely. Use an SVG/AVIF up to 16 megapixels, or upload PNG, JPEG or WebP.",
+      );
     return withImageConversion(async () => {
       try {
         const normalized = await image

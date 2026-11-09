@@ -26,8 +26,12 @@ import type { JsonObject } from "./shared/json";
 import { recoverInterruptedCatalogJobs } from "./worker/catalog-recovery";
 import { recoverInterruptedAiJobs } from "./worker/ai/recovery";
 import { registerAiConsumers } from "./worker/ai/consumer";
+import { configureImageRuntime } from "./shared/image-runtime";
+import { startMemoryTelemetry } from "./shared/memory-telemetry";
 
 async function main(): Promise<void> {
+  configureImageRuntime();
+  const stopMemoryTelemetry = startMemoryTelemetry("worker");
   const connectionString = directConnection(
     env.DATABASE_URL,
     env.DIRECT_DATABASE_URL,
@@ -99,18 +103,15 @@ async function main(): Promise<void> {
   await boss.createQueue("asset-variants");
   await boss.work<JsonObject>(
     "asset-variants",
-    { batchSize: 20, pollingIntervalSeconds: env.QUEUE_POLL_SECONDS },
+    {
+      batchSize: 8,
+      pollingIntervalSeconds: Math.min(env.QUEUE_POLL_SECONDS, 2),
+    },
     async (jobs) => {
-      for (let index = 0; index < jobs.length; index += 4)
-        await Promise.all(
-          jobs
-            .slice(index, index + 4)
-            .map((job) =>
-              job.data.cleanupRejected === true
-                ? cleanupRejectedCutouts(db, storage, job.data)
-                : generateVariants(db, storage, job.data),
-            ),
-        );
+      for (const job of jobs)
+        if (job.data.cleanupRejected === true)
+          await cleanupRejectedCutouts(db, storage, job.data);
+        else await generateVariants(db, storage, job.data);
     },
   );
   for (const [queue, concurrency] of [
@@ -210,6 +211,7 @@ async function main(): Promise<void> {
   logger.info("Neptun worker connected to PostgreSQL");
   const stop = async () => {
     stopping = true;
+    stopMemoryTelemetry();
     clearInterval(timer);
     clearInterval(recoveryTimer);
     await boss.stop({ graceful: true, timeout: 30_000 });

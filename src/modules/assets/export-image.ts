@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   BadGatewayException,
+  HttpException,
   NotFoundException,
   Injectable,
   Inject,
@@ -23,6 +24,10 @@ import { STORAGE } from "../storage/storage.port";
 import type { StoragePort } from "../storage/storage.port";
 import type { AuthenticatedRequest } from "../auth/domain/actor";
 import { sendStoredAsset } from "./asset-response";
+import {
+  createImageWorkBudget,
+  imageWorkBusy,
+} from "../../security/image-work";
 
 export const EXPORT_IMAGE_DOWNLOADER = Symbol("EXPORT_IMAGE_DOWNLOADER");
 export type ExportImageDownloader = (source: string) => Promise<PublicDownload>;
@@ -34,6 +39,17 @@ const mimeTypes = [
   "image/avif",
 ];
 const maxBytes = 12_000_000;
+const aliasQuery =
+  "SELECT a.* FROM assets a JOIN asset_aliases aa ON aa.organization_id=a.organization_id AND aa.asset_id=a.id WHERE aa.organization_id=$1 AND aa.source_path=$2";
+type AliasAsset = AssetRow & { deleted_at: Date | null };
+// Misses own downloaded buffers before sendStoredAsset can reserve the later
+// response. Admit them separately, before any transaction or image download.
+const exportMissWork = createImageWorkBudget({
+  maxConcurrent: 2,
+  maxBytes: maxBytes * 2,
+  maxQueued: 8,
+  maxWaitMs: 10_000,
+});
 export function legacyNeptunImageUrl(source: string): URL {
   try {
     const url = publicHttpsUrl(source);
@@ -66,6 +82,7 @@ export class CacheExportImageCommand extends Command<AssetRow> {
 }
 @Injectable()
 export class ExportImageService {
+  private readonly pending = new Map<string, Promise<AssetRow>>();
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(STORAGE) private readonly storage: StoragePort,
@@ -78,26 +95,52 @@ export class ExportImageService {
     source: string,
   ): Promise<AssetRow> {
     const url = legacyNeptunImageUrl(source).href;
+    const previous = (
+      await this.db.query<AliasAsset>(aliasQuery, [organizationId, url])
+    )[0];
+    const cached = await this.availableAsset(previous);
+    if (cached) return cached;
+    const key = `${organizationId}:${url}`;
+    const running = this.pending.get(key);
+    if (running) return running;
+    if (this.pending.size >= 64) throw imageWorkBusy();
+    const pending = exportMissWork.run(maxBytes, () =>
+      this.populate(organizationId, userId, url),
+    );
+    this.pending.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.pending.get(key) === pending) this.pending.delete(key);
+    }
+  }
+  private async availableAsset(
+    existing?: AliasAsset,
+  ): Promise<AssetRow | null> {
+    if (existing?.deleted_at)
+      throw new NotFoundException("This image was removed.");
+    return existing &&
+      mimeTypes.includes(existing.mime_type) &&
+      Number(existing.size) <= maxBytes &&
+      (await this.storage.exists(existing.storage_key))
+      ? existing
+      : null;
+  }
+  private async populate(
+    organizationId: string,
+    userId: string,
+    url: string,
+  ): Promise<AssetRow> {
     return this.db.transaction(async (client) => {
       await client.query(
         "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
         [`${organizationId}:export-image:${url}`],
       );
       const existing = (
-        await client.query<AssetRow & { deleted_at: Date | null }>(
-          "SELECT a.* FROM assets a JOIN asset_aliases aa ON aa.organization_id=a.organization_id AND aa.asset_id=a.id WHERE aa.organization_id=$1 AND aa.source_path=$2",
-          [organizationId, url],
-        )
+        await client.query<AliasAsset>(aliasQuery, [organizationId, url])
       ).rows[0];
-      if (existing?.deleted_at)
-        throw new NotFoundException("This image was removed.");
-      if (
-        existing &&
-        mimeTypes.includes(existing.mime_type) &&
-        Number(existing.size) <= maxBytes &&
-        (await this.storage.exists(existing.storage_key))
-      )
-        return existing;
+      const cached = await this.availableAsset(existing);
+      if (cached) return cached;
       try {
         const input = await this.download(url);
         legacyNeptunImageUrl(input.url);
@@ -133,7 +176,9 @@ export class ExportImageService {
           [organizationId, url, asset.id],
         );
         return asset;
-      } catch {
+      } catch (error) {
+        if (error instanceof HttpException && error.getStatus() === 429)
+          throw error;
         throw new BadGatewayException(
           "The original product image could not be loaded. Upload your own image or retry.",
         );

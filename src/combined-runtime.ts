@@ -35,9 +35,7 @@ export function startCombined(options: CombinedRuntimeOptions = {}): void {
   const launch = (name: string, args: string[], worker = false) => {
     const child = spawn(process.execPath, args, {
       stdio: ["ignore", worker ? "pipe" : "inherit", "inherit"],
-      env: worker
-        ? { ...process.env, UV_THREADPOOL_SIZE: "1", MALLOC_ARENA_MAX: "2" }
-        : process.env,
+      env: { ...process.env, UV_THREADPOOL_SIZE: "1", MALLOC_ARENA_MAX: "2" },
     });
     children.add(child);
     child.once("error", (error) => {
@@ -67,11 +65,7 @@ export function startCombined(options: CombinedRuntimeOptions = {}): void {
 
   const worker = launch(
     "worker",
-    options.workerArgs ?? [
-      "--max-old-space-size=160",
-      "-e",
-      'const sharp=require("sharp");sharp.cache({memory:16,files:0,items:50});sharp.concurrency(1);require("./dist/src/worker.js");',
-    ],
+    options.workerArgs ?? ["--max-old-space-size=160", "dist/src/worker.js"],
     true,
   );
   const lines = createInterface({ input: worker.stdout! });

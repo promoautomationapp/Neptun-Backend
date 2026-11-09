@@ -9,6 +9,119 @@ import {
   siteTransport,
 } from "../../src/modules/catalog/neptun-source";
 describe("Neptun authoritative catalog parsing", () => {
+  test("reads bounded streamed HTML without corrupting split UTF-8 characters", async () => {
+    const html = "<nav>Ngjyrë blu · Çmimi</nav>";
+    const bytes = new TextEncoder().encode(html);
+    const split = bytes.indexOf(0xc3) + 1;
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes.slice(0, split));
+          controller.enqueue(bytes.slice(split));
+          controller.close();
+        },
+      }),
+    );
+    const text = jest.spyOn(response, "text");
+    const fetchMock = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(response);
+    try {
+      await expect(
+        siteTransport.get("https://www.neptun-ks.com/"),
+      ).resolves.toBe(html);
+      expect(text).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+  test("cancels an oversized unadvertised stream before reading the complete page", async () => {
+    jest.useFakeTimers();
+    const readers: {
+      read: jest.Mock;
+      cancel: jest.Mock;
+      releaseLock: jest.Mock;
+    }[] = [];
+    const fetchMock = jest
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => {
+        const reader = {
+          read: jest
+            .fn()
+            .mockResolvedValue({
+              done: false,
+              value: new Uint8Array(3_100_000),
+            }),
+          cancel: jest.fn().mockResolvedValue(undefined),
+          releaseLock: jest.fn(),
+        };
+        readers.push(reader);
+        return {
+          ok: true,
+          headers: new Headers(),
+          body: { getReader: () => reader },
+        } as unknown as Response;
+      });
+    try {
+      const pending = expect(
+        siteTransport.get("https://www.neptun-ks.com/"),
+      ).rejects.toThrow("Neptun page is oversized.");
+      await jest.runAllTimersAsync();
+      await pending;
+      expect(readers).toHaveLength(3);
+      for (const reader of readers) {
+        expect(reader.read).toHaveBeenCalledTimes(2);
+        expect(reader.cancel).toHaveBeenCalledTimes(1);
+        expect(reader.releaseLock).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      fetchMock.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+  test.each([
+    {
+      status: 200,
+      contentLength: "6000001",
+      message: "Neptun page is oversized.",
+    },
+    {
+      status: 503,
+      contentLength: null,
+      message: "Neptun source returned 503.",
+    },
+  ])(
+    "cancels rejected response bodies without allocating them: $status/$contentLength",
+    async ({ status, contentLength, message }) => {
+      jest.useFakeTimers();
+      const cancel = jest.fn().mockResolvedValue(undefined);
+      const getReader = jest.fn();
+      const fetchMock = jest.spyOn(globalThis, "fetch").mockImplementation(
+        async () =>
+          ({
+            ok: status === 200,
+            status,
+            headers: new Headers(
+              contentLength ? { "content-length": contentLength } : {},
+            ),
+            body: { cancel, getReader },
+          }) as unknown as Response,
+      );
+      try {
+        const pending = expect(
+          siteTransport.get("https://www.neptun-ks.com/"),
+        ).rejects.toThrow(message);
+        await jest.runAllTimersAsync();
+        await pending;
+        expect(cancel).toHaveBeenCalledTimes(3);
+        expect(getReader).not.toHaveBeenCalled();
+      } finally {
+        fetchMock.mockRestore();
+        jest.useRealTimers();
+      }
+    },
+  );
   test("website timeouts retry and explain that the existing catalog is preserved", async () => {
     jest.useFakeTimers();
     const timeout = new Error("The operation was aborted due to timeout");

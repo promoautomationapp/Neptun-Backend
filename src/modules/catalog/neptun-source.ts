@@ -388,6 +388,39 @@ export interface SourceTransport {
   get(url: string): Promise<string>;
 }
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const MAX_CATALOG_PAGE_BYTES = 6_000_000;
+
+/** Enforce the cap while receiving decoded HTTP bytes. Checking response.text()
+ * afterwards still buffers the entire page when Content-Length is absent,
+ * inaccurate, or describes a compressed response. */
+async function catalogPageText(response: Response): Promise<string> {
+  if (Number(response.headers.get("content-length")) > MAX_CATALOG_PAGE_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error("Neptun page is oversized.");
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parts: string[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > MAX_CATALOG_PAGE_BYTES)
+        throw new Error("Neptun page is oversized.");
+      parts.push(decoder.decode(chunk.value, { stream: true }));
+    }
+    parts.push(decoder.decode());
+    return parts.join("");
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
 export const siteTransport: SourceTransport = {
   async get(value) {
     const url = siteUrl(value);
@@ -401,14 +434,11 @@ export const siteTransport: SourceTransport = {
             Accept: "text/html",
           },
         });
-        if (!response.ok)
+        if (!response.ok) {
+          await response.body?.cancel().catch(() => undefined);
           throw new Error(`Neptun source returned ${response.status}.`);
-        if (Number(response.headers.get("content-length")) > 6_000_000)
-          throw new Error("Neptun page is oversized.");
-        const value = await response.text();
-        if (value.length > 6_000_000)
-          throw new Error("Neptun page is oversized.");
-        return value;
+        }
+        return await catalogPageText(response);
       } catch (error) {
         if (attempt === 2) {
           if (error instanceof Error && error.name === "TimeoutError")
