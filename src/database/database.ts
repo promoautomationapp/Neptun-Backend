@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { env } from "../config/environment";
 import * as schema from "./schema";
 import { POSTGRES_AUTH_OPTIONS } from "./postgres-options";
+import { logger } from "../shared/logger";
 
 export const DATABASE_CONNECTION = Symbol("DATABASE_CONNECTION");
 
@@ -23,6 +24,15 @@ export class Database implements OnModuleDestroy {
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
     });
+    // pg has already removed the failed idle client before this event. Handle
+    // the event so a transient database disconnect does not terminate either
+    // process; the pool opens a fresh connection for subsequent work.
+    this.pool.on("error", (error) => {
+      logger.warn(
+        { err: error },
+        "Database idle connection failed; pool will replace it",
+      );
+    });
     this.orm = drizzle(this.pool, { schema });
   }
   async query<T extends QueryResultRow>(
@@ -35,16 +45,42 @@ export class Database implements OnModuleDestroy {
     operation: (client: PoolClient) => Promise<T>,
   ): Promise<T> {
     const client = await this.pool.connect();
+    let connectionError: Error | undefined;
+    let discard = false;
+    // A checked-out client has no pool idle listener while an operation awaits
+    // other work between queries. Keep that disconnect from becoming an
+    // unhandled Client error, then fail this transaction without replaying it.
+    const disconnected = (error: Error) => {
+      connectionError = error;
+      discard = true;
+      logger.warn(
+        { err: error },
+        "Database transaction connection interrupted",
+      );
+    };
+    client.on("error", disconnected);
     try {
       await client.query("BEGIN");
       const result = await operation(client);
+      if (connectionError) throw connectionError;
       await client.query("COMMIT");
       return result;
     } catch (error) {
-      await client.query("ROLLBACK");
+      if (!connectionError) {
+        try {
+          await client.query("ROLLBACK");
+        } catch (rollbackError) {
+          discard = true;
+          logger.warn(
+            { err: rollbackError },
+            "Database rollback failed; connection discarded",
+          );
+        }
+      }
       throw error;
     } finally {
-      client.release();
+      client.release(discard);
+      client.removeListener("error", disconnected);
     }
   }
   async onModuleDestroy(): Promise<void> {
