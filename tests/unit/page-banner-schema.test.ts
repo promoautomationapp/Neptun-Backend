@@ -1,5 +1,68 @@
 import { campaignSchema } from "../../src/modules/documents/domain/document";
 
+it("round-trips full-page image banners and independent overlays without changing source photos", () => {
+  const banner = {
+    id: "image-banner",
+    layoutRole: "banner",
+    type: "image",
+    image: "/base-photo.png",
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+    bannerOverlay: {
+      type: "gradient",
+      color: "#001122",
+      endColor: "#ffffff00",
+      angle: 180,
+      opacity: 0.45,
+    },
+  };
+  const document = {
+    id: "overlay-test",
+    name: "Brochure",
+    products: [],
+    pageArtworks: { cover: [banner] },
+  };
+  expect(campaignSchema.parse(document).pageArtworks).toEqual(
+    document.pageArtworks,
+  );
+  const texture = {
+    ...banner,
+    bannerOverlay: { type: "image", image: "/texture.png", opacity: 0.25 },
+  };
+  expect(
+    campaignSchema.parse({ ...document, pageArtworks: { cover: [texture] } })
+      .pageArtworks,
+  ).toEqual({ cover: [texture] });
+  for (const invalid of [
+    { color: "url(unsafe)" },
+    { endColor: "red; background: url(unsafe)" },
+    { opacity: 1.5 },
+    { angle: 361 },
+    { type: "script" },
+  ])
+    expect(
+      campaignSchema.safeParse({
+        ...document,
+        pageArtworks: {
+          cover: [
+            {
+              ...banner,
+              bannerOverlay: { ...banner.bannerOverlay, ...invalid },
+            },
+          ],
+        },
+      }).success,
+    ).toBe(false);
+  expect(
+    campaignSchema.safeParse({
+      ...document,
+      pageArtworks: { cover: [{ ...banner, height: 101 }] },
+    }).success,
+  ).toBe(false);
+});
+
 it("persists safe editable banner frames and rejects invalid new banner fields", () => {
   const banner = {
     id: "hero",

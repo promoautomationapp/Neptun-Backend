@@ -70,6 +70,23 @@ export const brochureFooterSchema = z.object({
 export const pageArtworkSchema = z
   .object({
     layoutRole: z.literal("banner").optional(),
+    bannerOverlay: z
+      .object({
+        type: z.enum(["color", "gradient", "image"]),
+        color: z
+          .string()
+          .regex(/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i)
+          .optional(),
+        endColor: z
+          .string()
+          .regex(/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i)
+          .optional(),
+        angle: z.number().min(0).max(360).optional(),
+        image: z.string().max(20000000).optional(),
+        opacity: z.number().min(0).max(1).optional(),
+      })
+      .strict()
+      .optional(),
     referenceSource: z.string().max(500).optional(),
     referenceRole: z
       .enum(["person", "wifi", "inverter", "energy", "promotion"])
@@ -122,7 +139,7 @@ export const pageArtworkSchema = z
       ["x", 0, 100],
       ["y", 0, 100],
       ["width", 1, 100],
-      ["height", 1, 70],
+      ["height", 1, 100],
     ] as const) {
       const value = artwork[key];
       if (
