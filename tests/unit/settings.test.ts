@@ -3,6 +3,44 @@ import {
   workspaceSettingsSchema,
 } from "../../src/modules/settings/domain/settings.schema";
 describe("settings contracts", () => {
+  test("retains canonical alpha colors in backgrounds, logo rules and price palettes, plus right-side detail placement", () => {
+    const input = {
+      productDesign: {
+        details: { placement: "right" },
+        divider: { color: "#11223388" },
+      },
+      brochure: {
+        coverBackground: {
+          color: "#12345680",
+          image: "",
+          gradient: { from: "#00000000", to: "#ffffffff", angle: 90 },
+        },
+        pricePalette: {
+          red: "#ff000088",
+          blue: "#11223399",
+          blueBand: "#234567aa",
+          saving: "#345678bb",
+        },
+      },
+      logoRules: [
+        {
+          id: "alpha",
+          target: "cover",
+          background: "color",
+          color: "#11223380",
+          image: "/brochure-presets/october/neptun-footer.svg",
+          enabled: true,
+        },
+      ],
+    };
+    expect(workspaceSettingsSchema.safeParse(input).success).toBe(true);
+    expect(resolveSettings(input)).toMatchObject(input);
+    expect(
+      workspaceSettingsSchema.safeParse({
+        productDesign: { details: { placement: "outside" } },
+      }).success,
+    ).toBe(false);
+  });
   test("new savings defaults compare the offer price while old explicit rules retain their original basis", () => {
     expect(resolveSettings(null).automaticSavings).toEqual({
       enabled: true,

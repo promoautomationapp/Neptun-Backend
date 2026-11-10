@@ -6,6 +6,37 @@ import {
 } from "../../src/modules/documents/domain/document";
 
 describe("brochure JSON contract", () => {
+  test("saves translucent colors and right-side product detail choices without changing the brochure", () => {
+    const input = {
+      id: "alpha",
+      name: "Alpha colors",
+      products: [{ code: "phone", name: "Phone", detailPlacement: "right" }],
+      coverMessageColor: "#11223380",
+      coverHeadlineColor: "#445566aa",
+      coverRibbonColors: { from: "#11223300", to: "#445566ff" },
+      brochureFooter: { from: "#aabbcc80", to: "#ffffff00" },
+      pageAppearances: {
+        cover: {
+          textColor: "#12345680",
+          brandColor: "#23456799",
+          screenLabelColor: "#345678aa",
+        },
+      },
+    };
+    expect(campaignSchema.parse(input)).toMatchObject(input);
+    expect(
+      campaignSchema.safeParse({
+        ...input,
+        coverMessageColor: "rgba(1,2,3,.5)",
+      }).success,
+    ).toBe(false);
+    expect(
+      campaignSchema.safeParse({
+        ...input,
+        coverMessageColor: "#112233;display:none",
+      }).success,
+    ).toBe(false);
+  });
   test("validates editable footer geometry and preserves optional page number choices", () => {
     const base = { id: "footer", name: "Offers", products: [] };
     const footer = {

@@ -7,10 +7,31 @@ export interface BackgroundContext {
 }
 export const IMAGE_PREPARATION_REVISION = 3;
 
-const color = (value: unknown) =>
-  typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
-    ? value.toLowerCase()
-    : "";
+// Preserve every existing opaque signature. Translucent paint uses its actual
+// appearance on white paper, identically to the client's canonical context.
+function color(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(value)
+  )
+    return "";
+  const hex = value.toLowerCase();
+  if (hex.length === 7) return hex;
+  const alpha = parseInt(hex.slice(7, 9), 16) / 255;
+  return (
+    "#" +
+    [1, 3, 5]
+      .map((offset) =>
+        Math.round(
+          parseInt(hex.slice(offset, offset + 2), 16) * alpha +
+            255 * (1 - alpha),
+        )
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("")
+  );
+}
 
 // Keep the same canonical context on the client and server. Image URLs identify
 // the background; the signature stored on a product never contains image data.
