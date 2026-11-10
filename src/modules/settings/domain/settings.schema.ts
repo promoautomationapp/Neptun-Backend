@@ -138,6 +138,7 @@ export const brochureDefaultsSchema = z
       .default("neptun1080x1350"),
     automaticProductLayout: z.boolean().default(true),
     brochureVisualStyle: z.enum(["current", "october"]).optional(),
+    brochureReferenceDesign: z.literal("black-friday").optional(),
     pageDecorationDefaults: pageDecorationSchema.optional(),
     layout: z
       .enum([
@@ -147,6 +148,7 @@ export const brochureDefaultsSchema = z
         "grid6portrait",
         "grid6",
         "grid9",
+        "grid12",
         "classic8",
         "duo4",
         "pair2",
@@ -227,6 +229,7 @@ export const brochureDefaultsSchema = z
 /** Only presentation fields belong to a reusable brochure design. */
 export const BROCHURE_DESIGN_KEYS = [
   "brochureVisualStyle",
+  "brochureReferenceDesign",
   "brochureFormat",
   "brochureFormatSnapshot",
   "layout",
@@ -312,6 +315,7 @@ export const brochurePresetSchema = z.object({
   design: z
     .object({
       brochureVisualStyle: z.enum(["current", "october"]).optional(),
+      brochureReferenceDesign: z.literal("black-friday").optional(),
       coverBrandTagline: z.string().max(500).optional(),
       offerStyle: priceStyle.optional(),
       pageDecorationDefaults: pageDecorationSchema.optional(),

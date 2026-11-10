@@ -64,12 +64,132 @@ export const brochureFooterSchema = z.object({
     .regex(/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i)
     .optional(),
 });
+export const pageArtworkSchema = z
+  .object({
+    layoutRole: z.literal("banner").optional(),
+    referenceSource: z.string().max(500).optional(),
+    referenceRole: z
+      .enum(["person", "wifi", "inverter", "energy", "promotion"])
+      .optional(),
+    textRuns: z
+      .array(
+        z
+          .object({
+            text: z.string().max(2000),
+            fontScale: z.number().min(0.1).max(5),
+            verticalAlign: z.enum(["baseline", "super", "top"]).optional(),
+            fontWeight: z.number().int().min(100).max(1000).optional(),
+            fontStyle: z.enum(["normal", "italic"]).optional(),
+            color: z
+              .string()
+              .regex(/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i)
+              .optional(),
+          })
+          .strict(),
+      )
+      .max(200)
+      .optional(),
+    wordSpacing: z.number().min(-1).max(5).optional(),
+    whiteSpace: z.enum(["nowrap", "pre-wrap"]).optional(),
+    shapePath: z
+      .string()
+      .max(20000)
+      .regex(/^[MmLlHhVvCcSsQqTtAaZzEe0-9.,+\s-]*$/)
+      .optional(),
+    fill: z
+      .string()
+      .regex(/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i)
+      .optional(),
+    stroke: z
+      .string()
+      .regex(/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i)
+      .optional(),
+    strokeWidth: z.number().min(0).max(10).optional(),
+    backgroundColor: z
+      .string()
+      .regex(/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i)
+      .optional(),
+    textVerticalAlign: z.enum(["top", "center", "bottom"]).optional(),
+    padding: z.number().min(0).max(10).optional(),
+  })
+  .catchall(jsonValue)
+  .superRefine((artwork, context) => {
+    if (artwork.layoutRole !== "banner") return;
+    for (const [key, minimum, maximum] of [
+      ["x", 0, 100],
+      ["y", 0, 100],
+      ["width", 1, 100],
+      ["height", 1, 70],
+    ] as const) {
+      const value = artwork[key];
+      if (
+        typeof value !== "number" ||
+        !Number.isFinite(value) ||
+        value < minimum ||
+        value > maximum
+      )
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: `Banner ${key} must be between ${minimum} and ${maximum}.`,
+        });
+    }
+  });
+const brochureInstallmentSchema = z
+  .object({
+    amount: z.number().positive().finite(),
+    count: z.number().int().min(1).max(60),
+    sale: z.number().positive().finite(),
+  })
+  .strict();
+const brochureSavingsSchema = z
+  .object({
+    value: z.number().positive().finite(),
+    type: z.enum(["amount", "percentage"]),
+    regular: z.number().positive().finite(),
+    sale: z.number().positive().finite(),
+  })
+  .strict();
+const documentProductSchema = jsonObject.superRefine((product, context) => {
+  if (product.brochureSavings !== undefined) {
+    const result = brochureSavingsSchema.safeParse(product.brochureSavings);
+    if (!result.success)
+      for (const issue of result.error.issues)
+        context.addIssue({
+          ...issue,
+          path: ["brochureSavings", ...issue.path],
+        });
+  }
+  if (product.productArtworks !== undefined) {
+    const result = z
+      .array(pageArtworkSchema)
+      .max(200)
+      .safeParse(product.productArtworks);
+    if (!result.success)
+      for (const issue of result.error.issues)
+        context.addIssue({
+          ...issue,
+          path: ["productArtworks", ...issue.path],
+        });
+  }
+  if (product.brochureInstallment === undefined) return;
+  const result = brochureInstallmentSchema.safeParse(
+    product.brochureInstallment,
+  );
+  if (!result.success)
+    for (const issue of result.error.issues)
+      context.addIssue({
+        ...issue,
+        path: ["brochureInstallment", ...issue.path],
+      });
+});
 export const campaignSchema = z
   .object({
     id: identifier,
     name: z.string().min(1).max(300),
     brochureFooter: brochureFooterSchema.optional(),
     brochurePresetId: z.string().max(100).optional(),
+    brochureReferenceDesign: z.literal("black-friday").optional(),
     coverBrandTagline: z.string().max(500).optional(),
     coverRibbonColors: z
       .object({
@@ -93,7 +213,7 @@ export const campaignSchema = z
       )
       .optional(),
     showFooterPageNumber: z.boolean().optional(),
-    products: z.array(jsonObject).max(2000),
+    products: z.array(documentProductSchema).max(2000),
     showCoverBand: z.boolean().default(false),
     coverMessageColor: z
       .string()
@@ -118,12 +238,21 @@ export const campaignSchema = z
     reviewComments: z.array(commentSchema).default([]),
     reviewHistory: z.array(historySchema).default([]),
   })
-  .catchall(jsonValue);
+  .catchall(jsonValue)
+  .superRefine((campaign, context) => {
+    if (campaign.pageArtworks === undefined) return;
+    const result = z
+      .record(z.string(), z.array(pageArtworkSchema).max(200))
+      .safeParse(campaign.pageArtworks);
+    if (!result.success)
+      for (const issue of result.error.issues)
+        context.addIssue({ ...issue, path: ["pageArtworks", ...issue.path] });
+  });
 export const postSchema = z
   .object({
     id: identifier,
     name: z.string().max(300).default("Social post"),
-    products: z.array(jsonObject).max(12),
+    products: z.array(documentProductSchema).max(12),
     version: z.number().int().positive().optional(),
     disabledAt: z.iso.datetime().nullable().optional(),
     disabledBy: z.string().max(320).nullable().optional(),
