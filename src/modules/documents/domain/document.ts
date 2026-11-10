@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { pageDecorationSchema } from "../../settings/domain/settings.schema";
+import {
+  pageDecorationSchema,
+  settingsColorSchema,
+} from "../../settings/domain/settings.schema";
 import { identifier, jsonValue, jsonObject } from "../../../shared/json";
 export const statuses = [
   "in_progress",
@@ -189,7 +192,9 @@ export const campaignSchema = z
     name: z.string().min(1).max(300),
     brochureFooter: brochureFooterSchema.optional(),
     brochurePresetId: z.string().max(100).optional(),
-    brochureReferenceDesign: z.literal("black-friday").optional(),
+    brochureReferenceDesign: z
+      .enum(["black-friday", "black-collection"])
+      .optional(),
     coverBrandTagline: z.string().max(500).optional(),
     coverRibbonColors: z
       .object({
@@ -198,6 +203,8 @@ export const campaignSchema = z
       })
       .optional(),
     brochureVisualStyle: z.enum(["current", "october"]).optional(),
+    brandLogoMode: z.enum(["auto", "white", "dark", "original"]).optional(),
+    brandLogoColor: settingsColorSchema.optional(),
     pageDecorationDefaults: pageDecorationSchema.optional(),
     pages: z
       .record(

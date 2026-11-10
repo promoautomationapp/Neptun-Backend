@@ -18,6 +18,8 @@ const color = z.union([
   z.literal(""),
   z.string().regex(/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i),
 ]);
+/** Shared optional design colors: empty means automatic/original styling. */
+export const settingsColorSchema = color;
 export const pageDecorationSchema = z.object({
   showHeader: z.boolean().optional(),
   showOnlineLogo: z.boolean().optional(),
@@ -138,7 +140,11 @@ export const brochureDefaultsSchema = z
       .default("neptun1080x1350"),
     automaticProductLayout: z.boolean().default(true),
     brochureVisualStyle: z.enum(["current", "october"]).optional(),
-    brochureReferenceDesign: z.literal("black-friday").optional(),
+    brandLogoMode: z.enum(["auto", "white", "dark", "original"]).optional(),
+    brandLogoColor: color.optional(),
+    brochureReferenceDesign: z
+      .enum(["black-friday", "black-collection"])
+      .optional(),
     pageDecorationDefaults: pageDecorationSchema.optional(),
     layout: z
       .enum([
@@ -291,6 +297,8 @@ export const BROCHURE_DESIGN_KEYS = [
   "logoRuleDefaults",
   "brandAssets",
   "brandLogos",
+  "brandLogoMode",
+  "brandLogoColor",
   "iconDefaults",
   "productDesign",
   "pageDecorationDefaults",
@@ -315,7 +323,11 @@ export const brochurePresetSchema = z.object({
   design: z
     .object({
       brochureVisualStyle: z.enum(["current", "october"]).optional(),
-      brochureReferenceDesign: z.literal("black-friday").optional(),
+      brandLogoMode: z.enum(["auto", "white", "dark", "original"]).optional(),
+      brandLogoColor: color.optional(),
+      brochureReferenceDesign: z
+        .enum(["black-friday", "black-collection"])
+        .optional(),
       coverBrandTagline: z.string().max(500).optional(),
       offerStyle: priceStyle.optional(),
       pageDecorationDefaults: pageDecorationSchema.optional(),

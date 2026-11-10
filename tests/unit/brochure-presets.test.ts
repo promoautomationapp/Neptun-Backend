@@ -156,3 +156,113 @@ describe("reusable brochure designs and page decoration contract", () => {
     expect(resolveSettings({ offerStyle: "compact" }).offerStyle).toBe("card");
   });
 });
+
+describe("persisted optional manufacturer logo colors", () => {
+  test.each(["", "#12abEF", "#12345678"])(
+    "preserves custom color %s across brochures, defaults and presets",
+    (brandLogoColor) => {
+      const campaign = campaignSchema.parse({
+        id: "logo-color",
+        name: "Offer",
+        products: [],
+        brandLogoColor,
+        brandLogoMode: "original",
+      });
+      const settings = workspaceSettingsSchema.parse({
+        brochure: { brandLogoColor, brandLogoMode: "original" },
+        brochurePresets: [
+          {
+            id: "custom-logo",
+            name: "Logo color",
+            design: { brandLogoColor, brandLogoMode: "original" },
+          },
+        ],
+      });
+      expect(campaign.brandLogoColor).toBe(brandLogoColor);
+      expect(campaign.brandLogoMode).toBe("original");
+      expect(settings.brochure.brandLogoColor).toBe(brandLogoColor);
+      expect(settings.brochurePresets[0]!.design.brandLogoColor).toBe(
+        brandLogoColor,
+      );
+      expect(settings.brochurePresets[0]!.design.brandLogoMode).toBe(
+        "original",
+      );
+    },
+  );
+  test("old appearance modes remain optional and compatible", () => {
+    expect(
+      campaignSchema.parse({ id: "old-logo", name: "Offer", products: [] })
+        .brandLogoColor,
+    ).toBeUndefined();
+    expect(resolveSettings(null).brochure.brandLogoColor).toBeUndefined();
+    for (const brandLogoMode of ["auto", "white", "dark", "original"])
+      expect(
+        workspaceSettingsSchema.safeParse({
+          brochure: { brandLogoMode },
+          brochurePresets: [
+            {
+              id: "old-logo-mode",
+              name: "Old mode",
+              design: { brandLogoMode },
+            },
+          ],
+        }).success,
+      ).toBe(true);
+  });
+  test.each([
+    "red",
+    "rgb(255,0,0)",
+    "url(javascript:bad)",
+    "#123456;display:none",
+    123456,
+  ])("rejects invalid persisted logo color %p", (brandLogoColor) => {
+    expect(
+      campaignSchema.safeParse({
+        id: "bad-logo",
+        name: "Offer",
+        products: [],
+        brandLogoColor,
+      }).success,
+    ).toBe(false);
+    expect(
+      workspaceSettingsSchema.safeParse({ brochure: { brandLogoColor } })
+        .success,
+    ).toBe(false);
+    expect(
+      workspaceSettingsSchema.safeParse({
+        brochurePresets: [
+          { id: "bad-logo", name: "Bad", design: { brandLogoColor } },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+test("keeps both black brochure designs in campaign/default/preset snapshots", () => {
+  for (const brochureReferenceDesign of ["black-friday", "black-collection"]) {
+    expect(
+      campaignSchema.parse({
+        id: "black-design",
+        name: "Offer",
+        products: [],
+        brochureReferenceDesign,
+      }).brochureReferenceDesign,
+    ).toBe(brochureReferenceDesign);
+    const settings = workspaceSettingsSchema.parse({
+      brochure: { brochureReferenceDesign },
+      brochurePresets: [
+        {
+          id: "black-design",
+          name: "Black design",
+          design: { brochureReferenceDesign },
+        },
+      ],
+    });
+    expect(settings.brochure.brochureReferenceDesign).toBe(
+      brochureReferenceDesign,
+    );
+    expect(settings.brochurePresets[0]!.design.brochureReferenceDesign).toBe(
+      brochureReferenceDesign,
+    );
+  }
+});
